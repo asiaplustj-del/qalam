@@ -16,7 +16,9 @@ public readonly record struct KeyInput(
     SpecialKey Special,
     char PhysicalKey = '\0',
     bool Shift = false, bool Caps = false, bool Ctrl = false, bool Alt = false, bool Meta = false,
-    bool RightSide = false);
+    bool RightSide = false,
+    /// <summary>Stable key name for custom hotkeys: "Q", "1", "F9", "Pause", "Insert", "CapsLock", "Num5"…</summary>
+    string? KeyName = null);
 
 /// <summary>Everything the controller needs from Windows / macOS.</summary>
 public interface IKeyboardPlatform : IDisposable

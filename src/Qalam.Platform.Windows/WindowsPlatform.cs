@@ -122,11 +122,26 @@ public sealed class WindowsPlatform : IKeyboardPlatform
         if (sp == SpecialKey.Other && !extended && ScanToKey.TryGetValue(info.scanCode, out var k)) { key = k; sp = SpecialKey.None; }
         bool right = vk is 0xA1 or 0xA3 or 0xA5 || (extended && vk is 0x11 or 0x12);
         // modifier flags exclude the key itself
+        string? name = key != '\0' ? char.ToUpperInvariant(key).ToString() : KeyName(vk, extended);
         return new KeyInput(down, sp, key,
             Shift: shift && sp != SpecialKey.Shift, Caps: caps,
             Ctrl: ctrl && sp != SpecialKey.Ctrl, Alt: alt && sp != SpecialKey.Alt, Meta: win && sp != SpecialKey.Meta,
-            RightSide: right);
+            RightSide: right, KeyName: name);
     }
+
+    private static string? KeyName(uint vk, bool extended) => vk switch
+    {
+        >= 0x70 and <= 0x87 => "F" + (vk - 0x6F),
+        0x13 or 0x03 => "Pause",
+        0x14 => "CapsLock", 0x91 => "ScrollLock", 0x90 => "NumLock", 0x2C => "PrintScreen", 0x5D => "Menu",
+        0x2D => "Insert", 0x2E => "Delete", 0x24 => "Home", 0x23 => "End", 0x21 => "PageUp", 0x22 => "PageDown",
+        0x25 => "Left", 0x26 => "Up", 0x27 => "Right", 0x28 => "Down",
+        0x1B => "Escape", 0x20 => "Space", 0x0D => extended ? "NumEnter" : "Enter", 0x09 => "Tab", 0x08 => "Backspace",
+        >= 0x60 and <= 0x69 => "Num" + (vk - 0x60),
+        0x6A => "Num*", 0x6B => "Num+", 0x6D => "Num-", 0x6E => "Num.", 0x6F => "Num/",
+        0x10 or 0xA0 or 0xA1 or 0x11 or 0xA2 or 0xA3 or 0x12 or 0xA4 or 0xA5 or 0x5B or 0x5C => null, // modifiers
+        _ => $"Key{vk:X2}"
+    };
 
     // ------------------------------------------------------------------ layouts
     private List<KeyboardLayout>? _layoutsCache;

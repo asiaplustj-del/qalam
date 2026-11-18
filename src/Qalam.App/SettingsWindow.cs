@@ -128,20 +128,93 @@ public sealed class SettingsWindow : Window
 
     // ------------------------------------------------------------------ hotkeys
     private static readonly Hotkey[] HotkeyChoices =
-        { Hotkey.Pause, Hotkey.ShiftPause, Hotkey.AltPause, Hotkey.DoubleShift, Hotkey.DoubleCtrl, Hotkey.DoubleAlt, Hotkey.RightCtrl, Hotkey.None };
+        { Hotkey.Pause, Hotkey.ShiftPause, Hotkey.AltPause, Hotkey.DoubleShift, Hotkey.DoubleCtrl, Hotkey.DoubleAlt, Hotkey.RightCtrl, Hotkey.Custom, Hotkey.None };
 
-    private ComboBox HotkeyBox(Hotkey current, Action<Hotkey> set)
+    private readonly Dictionary<HotkeyAction, (ComboBox Box, Button Rec)> _hotkeyRows = new();
+    private HotkeyAction? _recordingFor;
+    private readonly TextBlock _hotkeyNote = new() { FontSize = 12, Foreground = Ui.Yellow, TextWrapping = TextWrapping.Wrap, IsVisible = false, Margin = new Thickness(0, 6, 0, 0) };
+
+    private Control HotkeyEditor(HotkeyAction action)
     {
-        var items = HotkeyChoices.Select(QalamSettings.Describe).ToList();
-        var cb = new ComboBox { ItemsSource = items, SelectedIndex = Array.IndexOf(HotkeyChoices, current), MinWidth = 190 };
+        var cb = new ComboBox { MinWidth = 200 };
+        var rec = Ui.GhostButton("Записать");
+        rec.Margin = new Thickness(8, 0, 0, 0);
         cb.SelectionChanged += (_, _) =>
         {
             if (_loading || cb.SelectedIndex < 0) return;
-            set(HotkeyChoices[cb.SelectedIndex]);
+            var h = HotkeyChoices[cb.SelectedIndex];
+            if (h == Hotkey.Custom)
+            {
+                if (S.GetCombo(action) is { } c) S.SetCustom(action, c);
+                else { StartRecording(action); return; }
+            }
+            else S.SetPreset(action, h);
             _app.SaveSettings();
             Refresh();
         };
-        return cb;
+        rec.Click += (_, _) => { if (_recordingFor == action) StopRecording(null); else StartRecording(action); };
+        _hotkeyRows[action] = (cb, rec);
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(cb); row.Children.Add(rec);
+        return row;
+    }
+
+    private void StartRecording(HotkeyAction action)
+    {
+        var ctl = _app.Controller;
+        if (ctl == null) return;
+        if (_recordingFor != null) StopRecording(null);
+        _recordingFor = action;
+        ((TextBlock)_hotkeyRows[action].Rec.Content!).Text = "Нажмите комбинацию… (Esc — отмена)";
+        _hotkeyRows[action].Rec.BorderBrush = Ui.Orange;
+        _hotkeyNote.IsVisible = false;
+        ctl.Recorded -= OnRecorded;
+        ctl.Recorded += OnRecorded;
+        ctl.StartRecording();
+    }
+
+    private void OnRecorded(KeyCombo? combo) => Dispatcher.UIThread.Post(() => StopRecording(combo));
+
+    private void StopRecording(KeyCombo? combo)
+    {
+        var ctl = _app.Controller;
+        ctl?.CancelRecording();
+        if (_recordingFor is not { } action) return;
+        _recordingFor = null;
+        ((TextBlock)_hotkeyRows[action].Rec.Content!).Text = "Записать";
+        _hotkeyRows[action].Rec.BorderBrush = Ui.Border;
+        if (combo != null)
+        {
+            if (!combo.IsSafe)
+            {
+                _hotkeyNote.Text = $"«{combo}» мешала бы обычному набору. Добавьте Ctrl, Alt или {(OperatingSystem.IsMacOS() ? "⌘" : "Win")} либо выберите F1–F24, Pause, Insert, ScrollLock и т. п.";
+                _hotkeyNote.IsVisible = true;
+            }
+            else
+            {
+                S.SetCustom(action, combo);
+                _app.SaveSettings();
+                _hotkeyNote.IsVisible = false;
+            }
+        }
+        Refresh();
+    }
+
+    private string? _hotkeySig;
+
+    private void RefreshHotkeys()
+    {
+        var sig = string.Join("|", Enum.GetValues<HotkeyAction>().Select(a => $"{S.GetHotkey(a)}:{S.GetCombo(a)}"));
+        if (sig == _hotkeySig) return;
+        _hotkeySig = sig;
+        foreach (var (action, (cb, _)) in _hotkeyRows)
+        {
+            var combo = S.GetCombo(action);
+            cb.ItemsSource = HotkeyChoices.Select(h => h == Hotkey.Custom
+                ? (combo != null ? $"Своя: {combo}" : "Своя комбинация…")
+                : QalamSettings.Describe(h)).ToList();
+            cb.SelectedIndex = Array.IndexOf(HotkeyChoices, S.GetHotkey(action));
+        }
     }
 
     private Control BuildHotkeysCard()
@@ -150,11 +223,13 @@ public sealed class SettingsWindow : Window
         p.Children.Add(Ui.Caption("Горячие клавиши"));
         p.Children.Add(Ui.Row("Исправить слово / отменить",
             "Пока печатаете — меняет раскладку текущего слова (повтор перебирает EN → RU → TJ). Сразу после автоисправления — отменяет его и запоминает слово.",
-            HotkeyBox(S.ManualHotkey, h => S.ManualHotkey = h)));
+            HotkeyEditor(HotkeyAction.Manual)));
         p.Children.Add(Ui.Row("Исправить выделенный текст", "Выделите фразу, набранную не в той раскладке, и нажмите.",
-            HotkeyBox(S.SelectionHotkey, h => S.SelectionHotkey = h)));
+            HotkeyEditor(HotkeyAction.Selection)));
         p.Children.Add(Ui.Row("Пауза / продолжить", "Быстро выключить Qalam, например для паролей или кода.",
-            HotkeyBox(S.PauseHotkey, h => S.PauseHotkey = h)));
+            HotkeyEditor(HotkeyAction.Pause)));
+        p.Children.Add(Ui.Hint("Выберите вариант из списка или нажмите «Записать» и затем любую комбинацию: Ctrl + Shift + Q, F9, CapsLock и т. д."));
+        p.Children.Add(_hotkeyNote);
         return Ui.CardBox(p);
     }
 
@@ -329,13 +404,13 @@ public sealed class SettingsWindow : Window
 
             if (ctl == null) { _statusTitle.Text = "Загружаю словари…"; _statusHint.Text = "Секунду"; }
             else if (!perms) { _statusTitle.Text = "Ждёт разрешения"; _statusHint.Text = "Без доступа к клавиатуре Qalam не видит нажатия"; }
-            else if (S.Paused) { _statusTitle.Text = "На паузе"; _statusHint.Text = $"Продолжить: {QalamSettings.Describe(S.PauseHotkey)}"; }
+            else if (S.Paused) { _statusTitle.Text = "На паузе"; _statusHint.Text = $"Продолжить: {S.DescribeAction(HotkeyAction.Pause)}"; }
             else
             {
                 _statusTitle.Text = S.AutoMode ? "Работает" : "Только вручную";
                 _statusHint.Text = S.AutoMode
-                    ? $"Исправляет при пробеле · вручную: {QalamSettings.Describe(S.ManualHotkey)}"
-                    : $"Исправляйте клавишей {QalamSettings.Describe(S.ManualHotkey)}";
+                    ? $"Исправляет при пробеле · вручную: {S.DescribeAction(HotkeyAction.Manual)}"
+                    : $"Исправляйте клавишей {S.DescribeAction(HotkeyAction.Manual)}";
             }
             ((TextBlock)_pauseButton.Content!).Text = S.Paused ? "Продолжить" : "Пауза";
             _pauseButton.Background = S.Paused ? Ui.Orange : Ui.Yellow;
@@ -362,6 +437,7 @@ public sealed class SettingsWindow : Window
             foreach (var a in S.ExcludedApps.ToList())
                 _appsList.Children.Add(Pill(a, () => { S.ExcludedApps.Remove(a); _app.SaveSettings(); Refresh(); }));
 
+            RefreshHotkeys();
             if (!_layoutsBuilt && _app.Platform != null) { RefreshLayouts(); _layoutsBuilt = true; }
         }
         finally { _loading = wasLoading; }

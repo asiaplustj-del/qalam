@@ -11,6 +11,13 @@ public sealed class QalamController : IDisposable
     public QalamSettings Settings { get; }
 
     public event Action<Correction>? Corrected;
+    /// <summary>Raised after <see cref="StartRecording"/>: the combo pressed, or null if cancelled (Esc).</summary>
+    public event Action<KeyCombo?>? Recorded;
+    public bool Recording { get; private set; }
+    private string? _swallowUp;   // key whose release must also be swallowed (hotkey keys like CapsLock)
+
+    public void StartRecording() { lock (_sync) Recording = true; }
+    public void CancelRecording() { lock (_sync) Recording = false; }
     public event Action? StateChanged;
 
     // hotkey tracking
@@ -95,9 +102,33 @@ public sealed class QalamController : IDisposable
             }
             return false;
         }
-        if (!k.IsDown) return false;
+        if (!k.IsDown)
+        {
+            if (_swallowUp != null && k.KeyName == _swallowUp) { _swallowUp = null; return true; }
+            return false;
+        }
         _otherKeySinceDown = true;
         _lastTapKey = SpecialKey.None;
+
+        // ---------- recording a custom shortcut ----------
+        if (Recording && k.KeyName != null)
+        {
+            Recording = false;
+            _swallowUp = k.KeyName;
+            bool cancel = k.KeyName == "Escape" && !k.Ctrl && !k.Alt && !k.Shift && !k.Meta;
+            Recorded?.Invoke(cancel ? null : new KeyCombo(k.Ctrl, k.Alt, k.Shift, k.Meta, k.KeyName));
+            return true;
+        }
+
+        // ---------- custom shortcuts ----------
+        foreach (var a in Enum.GetValues<HotkeyAction>())
+        {
+            if (Settings.GetHotkey(a) != Hotkey.Custom || Settings.GetCombo(a) is not { } combo || !combo.Matches(k)) continue;
+            if (a != HotkeyAction.Pause && Settings.Paused) break;
+            _swallowUp = k.KeyName;
+            FireAction(a);
+            return true;
+        }
 
         // ---------- Pause-based hotkeys ----------
         if (k.Special == SpecialKey.Pause)
@@ -174,12 +205,22 @@ public sealed class QalamController : IDisposable
 
     private bool Fire(Hotkey h)
     {
-        if (h == Hotkey.None) return false;
-        if (h == Settings.PauseHotkey) { Paused = !Paused; return true; }
+        if (h is Hotkey.None or Hotkey.Custom || Recording) return false;
+        if (h == Settings.PauseHotkey) { FireAction(HotkeyAction.Pause); return true; }
         if (Settings.Paused) return false;
-        if (h == Settings.ManualHotkey) { ManualConvertCore(); return true; }
-        if (h == Settings.SelectionHotkey) { ConvertSelection(); return true; }
+        if (h == Settings.ManualHotkey) { FireAction(HotkeyAction.Manual); return true; }
+        if (h == Settings.SelectionHotkey) { FireAction(HotkeyAction.Selection); return true; }
         return false;
+    }
+
+    private void FireAction(HotkeyAction a)
+    {
+        switch (a)
+        {
+            case HotkeyAction.Pause: Paused = !Paused; break;
+            case HotkeyAction.Manual: ManualConvertCore(); break;
+            default: ConvertSelection(); break;
+        }
     }
 
     public void ManualConvert()

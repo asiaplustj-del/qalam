@@ -13,6 +13,41 @@ public enum Hotkey
     DoubleCtrl,
     DoubleAlt,      // Alt / Option
     RightCtrl,      // single tap of the right Ctrl
+    Custom,         // user-recorded combination (see *Combo properties)
+}
+
+public enum HotkeyAction { Manual, Selection, Pause }
+
+/// <summary>A user-recorded shortcut, e.g. Ctrl+Shift+Q or F9.</summary>
+public sealed record KeyCombo(bool Ctrl, bool Alt, bool Shift, bool Meta, string Key)
+{
+    private static readonly HashSet<string> TypingKeys = new() { "Space", "Enter", "Tab", "Backspace" };
+
+    public bool Matches(KeyInput k) => k.KeyName == Key && k.Ctrl == Ctrl && k.Alt == Alt && k.Shift == Shift && k.Meta == Meta;
+
+    /// <summary>Plain letters/digits (or with Shift only) would break normal typing.</summary>
+    public bool IsSafe
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(Key)) return false;
+            if (Ctrl || Alt || Meta) return true;
+            bool printable = Key.Length == 1 || TypingKeys.Contains(Key);
+            return !printable;
+        }
+    }
+
+    public override string ToString()
+    {
+        var parts = new List<string>();
+        bool mac = OperatingSystem.IsMacOS();
+        if (Ctrl) parts.Add(mac ? "⌃" : "Ctrl");
+        if (Alt) parts.Add(mac ? "⌥" : "Alt");
+        if (Shift) parts.Add(mac ? "⇧" : "Shift");
+        if (Meta) parts.Add(mac ? "⌘" : "Win");
+        parts.Add(Key);
+        return string.Join(mac ? " " : " + ", parts);
+    }
 }
 
 public sealed class QalamSettings
@@ -29,6 +64,30 @@ public sealed class QalamSettings
     public Hotkey ManualHotkey { get; set; } = OperatingSystem.IsMacOS() ? Hotkey.DoubleShift : Hotkey.Pause;
     public Hotkey SelectionHotkey { get; set; } = OperatingSystem.IsMacOS() ? Hotkey.DoubleCtrl : Hotkey.ShiftPause;
     public Hotkey PauseHotkey { get; set; } = OperatingSystem.IsMacOS() ? Hotkey.DoubleAlt : Hotkey.AltPause;
+
+    public KeyCombo? ManualCombo { get; set; }
+    public KeyCombo? SelectionCombo { get; set; }
+    public KeyCombo? PauseCombo { get; set; }
+
+    public Hotkey GetHotkey(HotkeyAction a) => a switch { HotkeyAction.Manual => ManualHotkey, HotkeyAction.Selection => SelectionHotkey, _ => PauseHotkey };
+    public KeyCombo? GetCombo(HotkeyAction a) => a switch { HotkeyAction.Manual => ManualCombo, HotkeyAction.Selection => SelectionCombo, _ => PauseCombo };
+    public void SetCustom(HotkeyAction a, KeyCombo c)
+    {
+        // a combination can belong to one action only
+        foreach (var other in Enum.GetValues<HotkeyAction>())
+            if (other != a && GetHotkey(other) == Hotkey.Custom && GetCombo(other) == c) SetPreset(other, Hotkey.None);
+        switch (a)
+        {
+            case HotkeyAction.Manual: ManualHotkey = Hotkey.Custom; ManualCombo = c; break;
+            case HotkeyAction.Selection: SelectionHotkey = Hotkey.Custom; SelectionCombo = c; break;
+            default: PauseHotkey = Hotkey.Custom; PauseCombo = c; break;
+        }
+    }
+    public void SetPreset(HotkeyAction a, Hotkey h)
+    {
+        switch (a) { case HotkeyAction.Manual: ManualHotkey = h; break; case HotkeyAction.Selection: SelectionHotkey = h; break; default: PauseHotkey = h; break; }
+    }
+    public string DescribeAction(HotkeyAction a) => GetHotkey(a) == Hotkey.Custom ? GetCombo(a)?.ToString() ?? "не задана" : Describe(GetHotkey(a));
 
     /// <summary>Process / app names where Qalam stays silent (password managers, games, terminals…).</summary>
     public List<string> ExcludedApps { get; set; } = new() { "KeePass", "KeePassXC", "1Password", "Bitwarden" };
@@ -85,6 +144,7 @@ public sealed class QalamSettings
         Hotkey.DoubleCtrl => OperatingSystem.IsMacOS() ? "⌃ Control дважды" : "Ctrl дважды",
         Hotkey.DoubleAlt => OperatingSystem.IsMacOS() ? "⌥ Option дважды" : "Alt дважды",
         Hotkey.RightCtrl => "Правый Ctrl",
+        Hotkey.Custom => "Своя комбинация",
         _ => h.ToString()
     };
 }

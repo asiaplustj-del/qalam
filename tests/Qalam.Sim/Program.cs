@@ -98,6 +98,23 @@ void Check(string name, bool ok) { Console.WriteLine($"  {(ok ? "OK  " : "FAIL")
     fp.Screen.Clear(); fp.Screen.Append("lkz dbyljec");
     fp.Tap(SpecialKey.Ctrl); fp.Tap(SpecialKey.Ctrl);
     Check($"selection: '{fp.Screen}'", fp.Screen.ToString() == "для виндоус");
+    // custom shortcut: record Ctrl+Shift+Q, then use it for manual conversion
+    KeyCombo? got = null;
+    ctl.Recorded += c => got = c;
+    ctl.StartRecording();
+    bool sw1 = fp.KeyHandler!(new KeyInput(true, SpecialKey.Other, Ctrl: true, Shift: true, KeyName: "Q"));
+    bool sw2 = fp.KeyHandler!(new KeyInput(false, SpecialKey.Other, Ctrl: true, Shift: true, KeyName: "Q"));
+    Check($"recorded combo: {got}", got?.Key == "Q" && got.Ctrl && got.Shift && sw1 && sw2 && got.IsSafe);
+    settings.SetCustom(HotkeyAction.Manual, got!);
+    fp.Screen.Clear(); fp.Click(); fp.Current = L["en"];
+    fp.Type("кошка", L["ru"]);
+    fp.KeyHandler!(new KeyInput(true, SpecialKey.Other, Ctrl: true, Shift: true, KeyName: "Q"));
+    Check($"custom Ctrl+Shift+Q converts: '{fp.Screen}'", fp.Screen.ToString() == "кошка");
+    Check("plain letter combo is unsafe", !new KeyCombo(false, false, true, false, "Q").IsSafe && new KeyCombo(false, false, false, false, "F9").IsSafe);
+    ctl.StartRecording();
+    fp.KeyHandler!(new KeyInput(true, SpecialKey.Navigation, KeyName: "Escape"));
+    Check("Esc cancels recording", got == null && !ctl.Recording);
+
     fp.Screen.Clear(); fp.Click(); fp.Current = L["ru"];
     fp.Type("ҳамчун ", L["tg"]);
     Check($"tajik in RU layout: '{fp.Screen}'", fp.Screen.ToString() == "ҳамчун " && fp.Current.Language == "tg");

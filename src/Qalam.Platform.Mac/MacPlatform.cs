@@ -50,6 +50,19 @@ public sealed class MacPlatform : IKeyboardPlatform
         [6] = 'z', [7] = 'x', [8] = 'c', [9] = 'v', [11] = 'b', [45] = 'n', [46] = 'm', [43] = ',', [47] = '.', [44] = '/',
     };
 
+    private static readonly Dictionary<long, string> KeyNames = new()
+    {
+        [122] = "F1", [120] = "F2", [99] = "F3", [118] = "F4", [96] = "F5", [97] = "F6", [98] = "F7", [100] = "F8",
+        [101] = "F9", [109] = "F10", [103] = "F11", [111] = "F12", [105] = "F13", [107] = "F14", [113] = "F15",
+        [106] = "F16", [64] = "F17", [79] = "F18", [80] = "F19", [90] = "F20",
+        [117] = "Delete", [115] = "Home", [119] = "End", [116] = "PageUp", [121] = "PageDown", [114] = "Help",
+        [123] = "Left", [124] = "Right", [125] = "Down", [126] = "Up",
+        [53] = "Escape", [49] = "Space", [36] = "Enter", [76] = "NumEnter", [48] = "Tab", [51] = "Backspace",
+        [82] = "Num0", [83] = "Num1", [84] = "Num2", [85] = "Num3", [86] = "Num4", [87] = "Num5", [88] = "Num6",
+        [89] = "Num7", [91] = "Num8", [92] = "Num9", [65] = "Num.", [67] = "Num*", [69] = "Num+", [78] = "Num-", [75] = "Num/",
+        [71] = "Clear", [10] = "§",
+    };
+
     public bool HasPermissions()
     {
         try { return AXIsProcessTrusted() && CGPreflightListenEventAccess(); } catch { return false; }
@@ -152,7 +165,8 @@ public sealed class MacPlatform : IKeyboardPlatform
             char key = '\0';
             if (special == SpecialKey.Other && CodeToKey.TryGetValue(code, out var k)) { key = k; special = SpecialKey.None; }
             // Option on Mac types special characters; we treat Option+key as a shortcut (context reset)
-            var input = new KeyInput(isDown, special, key, shift, caps, ctrl, alt, cmd);
+            string? name = key != '\0' ? char.ToUpperInvariant(key).ToString() : KeyNames.GetValueOrDefault(code, $"Key{code}");
+            var input = new KeyInput(isDown, special, key, shift, caps, ctrl, alt, cmd, KeyName: name);
             return handler(input) ? IntPtr.Zero : evt;
         }
         catch { return evt; }
