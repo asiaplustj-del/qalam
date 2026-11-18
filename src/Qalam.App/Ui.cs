@@ -6,7 +6,7 @@ using Avalonia.Media;
 namespace Qalam.App;
 
 /// <summary>Palette and building blocks borrowed from the studio's Oddi tool.</summary>
-internal static class Theme
+internal static class Ui
 {
     public static readonly Color OrangeC = Color.Parse("#F25C19");
     public static readonly Color YellowC = Color.Parse("#FED800");

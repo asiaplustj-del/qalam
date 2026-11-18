@@ -13,12 +13,12 @@ public sealed class SettingsWindow : Window
     private readonly QalamApp _app;
     private QalamSettings S => _app.Settings;
 
-    private readonly TextBlock _statusTitle = new() { FontSize = 15, FontWeight = FontWeight.Bold, Foreground = Theme.Text };
-    private readonly TextBlock _statusHint = Theme.Hint("");
+    private readonly TextBlock _statusTitle = new() { FontSize = 15, FontWeight = FontWeight.Bold, Foreground = Ui.Text };
+    private readonly TextBlock _statusHint = Ui.Hint("");
     private readonly ToggleSwitch _autoSwitch;
     private readonly Button _pauseButton;
     private readonly StackPanel _chips = new() { Orientation = Orientation.Horizontal };
-    private readonly TextBlock _lastFix = new() { FontFamily = Theme.Mono, FontSize = 12, Foreground = Theme.Muted, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly TextBlock _lastFix = new() { FontFamily = Ui.Mono, FontSize = 12, Foreground = Ui.Muted, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly StackPanel _exceptionsList = new() { Spacing = 6 };
     private readonly StackPanel _appsList = new() { Spacing = 6 };
     private readonly StackPanel _layoutsPanel = new() { Spacing = 4 };
@@ -31,19 +31,19 @@ public sealed class SettingsWindow : Window
         _app = app;
         Title = "Qalam";
         Width = 600; Height = 780; MinWidth = 480; MinHeight = 500;
-        Background = Theme.Bg;
+        Background = Ui.Bg;
         Icon = new WindowIcon(QalamApp.LoadBitmap("qalam.png"));
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Closing += (_, e) => { e.Cancel = true; Hide(); };   // closing = hide to tray
 
-        _autoSwitch = Theme.Switch(S.AutoMode);
+        _autoSwitch = Ui.Switch(S.AutoMode);
         _autoSwitch.IsCheckedChanged += (_, _) =>
         {
             if (_loading) return;
             S.AutoMode = _autoSwitch.IsChecked == true;
             _app.SaveSettings();
         };
-        _pauseButton = Theme.PrimaryButton("Пауза", yellow: true);
+        _pauseButton = Ui.PrimaryButton("Пауза", yellow: true);
         _pauseButton.Click += (_, _) => _app.TogglePause();
 
         _permissionCard = BuildPermissionCard();
@@ -61,7 +61,7 @@ public sealed class SettingsWindow : Window
         root.Children.Add(new TextBlock
         {
             Text = "Qalam 0.1 · студия видеопродакшена «Азия-Плюс» · всё работает на вашем компьютере, без интернета",
-            FontSize = 11, Foreground = Theme.Dim, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center,
+            FontSize = 11, Foreground = Ui.Dim, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 6, 0, 0)
         });
 
@@ -76,13 +76,13 @@ public sealed class SettingsWindow : Window
     {
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(0, 0, 0, 4) };
         var logo = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        logo.Children.Add(new TextBlock { Text = "Qalam", FontSize = 24, FontWeight = FontWeight.ExtraBold, Foreground = Theme.Text });
-        logo.Children.Add(new TextBlock { Text = ".", FontSize = 24, FontWeight = FontWeight.ExtraBold, Foreground = Theme.Orange });
+        logo.Children.Add(new TextBlock { Text = "Qalam", FontSize = 24, FontWeight = FontWeight.ExtraBold, Foreground = Ui.Text });
+        logo.Children.Add(new TextBlock { Text = ".", FontSize = 24, FontWeight = FontWeight.ExtraBold, Foreground = Ui.Orange });
         g.Children.Add(logo);
         _chips.Margin = new Thickness(14, 4, 0, 0);
         _chips.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(_chips, 1); g.Children.Add(_chips);
-        var hide = Theme.GhostButton("Свернуть в трей");
+        var hide = Ui.GhostButton("Свернуть в трей");
         hide.Click += (_, _) => Hide();
         Grid.SetColumn(hide, 2); g.Children.Add(hide);
         return g;
@@ -91,14 +91,14 @@ public sealed class SettingsWindow : Window
     private Border BuildPermissionCard()
     {
         var p = new StackPanel { Spacing = 8 };
-        p.Children.Add(Theme.Title("Нужно разрешение macOS"));
-        p.Children.Add(Theme.Hint("Чтобы видеть нажатия и исправлять слова, разрешите Qalam доступ в «Системные настройки → Конфиденциальность и безопасность»: «Универсальный доступ» и «Мониторинг ввода». Qalam включится сам через пару секунд после разрешения."));
-        var b = Theme.PrimaryButton("Открыть настройки доступа", yellow: true);
+        p.Children.Add(Ui.Title("Нужно разрешение macOS"));
+        p.Children.Add(Ui.Hint("Чтобы видеть нажатия и исправлять слова, разрешите Qalam доступ в «Системные настройки → Конфиденциальность и безопасность»: «Универсальный доступ» и «Мониторинг ввода». Qalam включится сам через пару секунд после разрешения."));
+        var b = Ui.PrimaryButton("Открыть настройки доступа", yellow: true);
         b.HorizontalAlignment = HorizontalAlignment.Left;
         b.Click += (_, _) => _app.Platform?.RequestPermissions();
         p.Children.Add(b);
-        var card = Theme.CardBox(p);
-        card.BorderBrush = Theme.Yellow;
+        var card = Ui.CardBox(p);
+        card.BorderBrush = Ui.Yellow;
         card.IsVisible = false;
         return card;
     }
@@ -106,13 +106,13 @@ public sealed class SettingsWindow : Window
     private Control BuildStatusCard()
     {
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto") };
-        var badge = Theme.Badge("⇄", yellow: false);
+        var badge = Ui.Badge("⇄", yellow: false);
         g.Children.Add(badge);
         var mid = new StackPanel { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(_statusTitle);
         mid.Children.Add(_statusHint);
         Grid.SetColumn(mid, 1); g.Children.Add(mid);
-        var autoLbl = new TextBlock { Text = "Авто", Foreground = Theme.Muted, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 6, 0) };
+        var autoLbl = new TextBlock { Text = "Авто", Foreground = Ui.Muted, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 6, 0) };
         var autoBox = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         autoBox.Children.Add(autoLbl); autoBox.Children.Add(_autoSwitch);
         Grid.SetColumn(autoBox, 2); g.Children.Add(autoBox);
@@ -123,7 +123,7 @@ public sealed class SettingsWindow : Window
         var p = new StackPanel { Spacing = 10 };
         p.Children.Add(g);
         p.Children.Add(_lastFix);
-        return Theme.CardBox(p);
+        return Ui.CardBox(p);
     }
 
     // ------------------------------------------------------------------ hotkeys
@@ -147,22 +147,22 @@ public sealed class SettingsWindow : Window
     private Control BuildHotkeysCard()
     {
         var p = new StackPanel();
-        p.Children.Add(Theme.Caption("Горячие клавиши"));
-        p.Children.Add(Theme.Row("Исправить слово / отменить",
+        p.Children.Add(Ui.Caption("Горячие клавиши"));
+        p.Children.Add(Ui.Row("Исправить слово / отменить",
             "Пока печатаете — меняет раскладку текущего слова (повтор перебирает EN → RU → TJ). Сразу после автоисправления — отменяет его и запоминает слово.",
             HotkeyBox(S.ManualHotkey, h => S.ManualHotkey = h)));
-        p.Children.Add(Theme.Row("Исправить выделенный текст", "Выделите фразу, набранную не в той раскладке, и нажмите.",
+        p.Children.Add(Ui.Row("Исправить выделенный текст", "Выделите фразу, набранную не в той раскладке, и нажмите.",
             HotkeyBox(S.SelectionHotkey, h => S.SelectionHotkey = h)));
-        p.Children.Add(Theme.Row("Пауза / продолжить", "Быстро выключить Qalam, например для паролей или кода.",
+        p.Children.Add(Ui.Row("Пауза / продолжить", "Быстро выключить Qalam, например для паролей или кода.",
             HotkeyBox(S.PauseHotkey, h => S.PauseHotkey = h)));
-        return Theme.CardBox(p);
+        return Ui.CardBox(p);
     }
 
     // ------------------------------------------------------------------ behaviour
     private Control BuildBehaviourCard()
     {
         var p = new StackPanel();
-        p.Children.Add(Theme.Caption("Поведение"));
+        p.Children.Add(Ui.Caption("Поведение"));
 
         var seg = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
         var names = new[] { "Осторожно", "Обычно", "Смело" };
@@ -183,30 +183,30 @@ public sealed class SettingsWindow : Window
             };
             buttons.Add(tb); seg.Children.Add(tb);
         }
-        p.Children.Add(Theme.Row("Чувствительность", "Как смело исправлять незнакомые слова (имена, сленг). Словарные слова исправляются всегда.", seg));
+        p.Children.Add(Ui.Row("Чувствительность", "Как смело исправлять незнакомые слова (имена, сленг). Словарные слова исправляются всегда.", seg));
 
         p.Children.Add(BoolRow("Однобуквенные слова", "«ф» → «a», «d» → «в», «e» → «у»", S.FixSingleLetters, v => S.FixSingleLetters = v));
         p.Children.Add(BoolRow("Учиться на отменах", "Если вы отменили исправление, слово попадает в исключения.", S.LearnFromUndo, v => S.LearnFromUndo = v));
         p.Children.Add(BoolRow("Запускать вместе с системой", null, S.StartWithSystem, v => S.StartWithSystem = v));
-        return Theme.CardBox(p);
+        return Ui.CardBox(p);
     }
 
     private Grid BoolRow(string label, string? hint, bool value, Action<bool> set)
     {
-        var sw = Theme.Switch(value);
+        var sw = Ui.Switch(value);
         sw.IsCheckedChanged += (_, _) => { if (_loading) return; set(sw.IsChecked == true); _app.SaveSettings(); };
-        return Theme.Row(label, hint, sw);
+        return Ui.Row(label, hint, sw);
     }
 
     // ------------------------------------------------------------------ layouts
     private Control BuildLayoutsCard()
     {
         var p = new StackPanel();
-        p.Children.Add(Theme.Caption("Языки"));
-        p.Children.Add(Theme.Hint("Qalam переключает только между раскладками, установленными в системе. Таджикская раскладка добавляется в настройках языка Windows/macOS (язык «Тоҷикӣ»)."));
+        p.Children.Add(Ui.Caption("Языки"));
+        p.Children.Add(Ui.Hint("Qalam переключает только между раскладками, установленными в системе. Таджикская раскладка добавляется в настройках языка Windows/macOS (язык «Тоҷикӣ»)."));
         _layoutsPanel.Margin = new Thickness(0, 10, 0, 0);
         p.Children.Add(_layoutsPanel);
-        return Theme.CardBox(p);
+        return Ui.CardBox(p);
     }
 
     private void RefreshLayouts()
@@ -222,7 +222,7 @@ public sealed class SettingsWindow : Window
                 Content = new TextBlock
                 {
                     Text = has ? name : $"{name} — раскладка не установлена",
-                    Foreground = has ? Theme.Text : Theme.Dim, FontSize = 14
+                    Foreground = has ? Ui.Text : Ui.Dim, FontSize = 14
                 }
             };
             cb.IsCheckedChanged += (_, _) =>
@@ -240,19 +240,19 @@ public sealed class SettingsWindow : Window
     private Control BuildExceptionsCard()
     {
         var p = new StackPanel();
-        p.Children.Add(Theme.Caption("Слова-исключения"));
-        p.Children.Add(Theme.Hint("Эти слова Qalam никогда не исправляет. Сюда же попадают слова, исправление которых вы отменили."));
+        p.Children.Add(Ui.Caption("Слова-исключения"));
+        p.Children.Add(Ui.Hint("Эти слова Qalam никогда не исправляет. Сюда же попадают слова, исправление которых вы отменили."));
         p.Children.Add(AddRow("Слово, например qalam или ghbdtn", w => _app.Controller?.Engine.Detector.User.AddException(w)));
         _exceptionsList.Margin = new Thickness(0, 10, 0, 0);
         p.Children.Add(_exceptionsList);
-        return Theme.CardBox(p);
+        return Ui.CardBox(p);
     }
 
     private Control BuildAppsCard()
     {
         var p = new StackPanel();
-        p.Children.Add(Theme.Caption("Программы-исключения"));
-        p.Children.Add(Theme.Hint("В этих программах Qalam молчит: менеджеры паролей, игры, терминалы. Достаточно части названия процесса."));
+        p.Children.Add(Ui.Caption("Программы-исключения"));
+        p.Children.Add(Ui.Hint("В этих программах Qalam молчит: менеджеры паролей, игры, терминалы. Достаточно части названия процесса."));
         p.Children.Add(AddRow("Название программы, например Code или Photoshop", w =>
         {
             if (!S.ExcludedApps.Contains(w, StringComparer.OrdinalIgnoreCase)) S.ExcludedApps.Add(w);
@@ -260,14 +260,14 @@ public sealed class SettingsWindow : Window
         }));
         _appsList.Margin = new Thickness(0, 10, 0, 0);
         p.Children.Add(_appsList);
-        return Theme.CardBox(p);
+        return Ui.CardBox(p);
     }
 
     private Grid AddRow(string placeholder, Action<string> add)
     {
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 10, 0, 0) };
-        var tb = new TextBox { Watermark = placeholder, Background = Theme.Field, BorderBrush = Theme.Border, CornerRadius = new CornerRadius(9), Padding = new Thickness(10, 8) };
-        var btn = Theme.GhostButton("+ Добавить");
+        var tb = new TextBox { Watermark = placeholder, Background = Ui.Field, BorderBrush = Ui.Border, CornerRadius = new CornerRadius(9), Padding = new Thickness(10, 8) };
+        var btn = Ui.GhostButton("+ Добавить");
         btn.Margin = new Thickness(8, 0, 0, 0);
         void Do()
         {
@@ -285,25 +285,25 @@ public sealed class SettingsWindow : Window
     private static Control Pill(string text, Action remove)
     {
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        g.Children.Add(new TextBlock { Text = text, FontFamily = Theme.Mono, FontSize = 13, Foreground = Theme.Text, VerticalAlignment = VerticalAlignment.Center });
-        var x = new Button { Content = "×", Background = Brushes.Transparent, Foreground = Theme.Muted, Padding = new Thickness(8, 0), FontSize = 16, BorderThickness = new Thickness(0) };
+        g.Children.Add(new TextBlock { Text = text, FontFamily = Ui.Mono, FontSize = 13, Foreground = Ui.Text, VerticalAlignment = VerticalAlignment.Center });
+        var x = new Button { Content = "×", Background = Brushes.Transparent, Foreground = Ui.Muted, Padding = new Thickness(8, 0), FontSize = 16, BorderThickness = new Thickness(0) };
         x.Click += (_, _) => remove();
         Grid.SetColumn(x, 1); g.Children.Add(x);
-        return new Border { Background = Theme.Field, BorderBrush = Theme.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 4), Child = g };
+        return new Border { Background = Ui.Field, BorderBrush = Ui.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 4), Child = g };
     }
 
     // ------------------------------------------------------------------ try it
     private Control BuildTryCard()
     {
         var p = new StackPanel();
-        p.Children.Add(Theme.Caption("Проверить"));
-        p.Children.Add(Theme.Hint("Напечатайте здесь что-нибудь не в той раскладке, например ghbdtn или руддщ, и нажмите пробел."));
+        p.Children.Add(Ui.Caption("Проверить"));
+        p.Children.Add(Ui.Hint("Напечатайте здесь что-нибудь не в той раскладке, например ghbdtn или руддщ, и нажмите пробел."));
         p.Children.Add(new TextBox
         {
             Watermark = "ghbdtn vbh…", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 80, Margin = new Thickness(0, 10, 0, 0),
-            Background = Theme.Field, BorderBrush = Theme.Border, CornerRadius = new CornerRadius(9), Padding = new Thickness(10, 8), FontSize = 14
+            Background = Ui.Field, BorderBrush = Ui.Border, CornerRadius = new CornerRadius(9), Padding = new Thickness(10, 8), FontSize = 14
         });
-        return Theme.CardBox(p);
+        return Ui.CardBox(p);
     }
 
     // ------------------------------------------------------------------ state
@@ -338,8 +338,8 @@ public sealed class SettingsWindow : Window
                     : $"Исправляйте клавишей {QalamSettings.Describe(S.ManualHotkey)}";
             }
             ((TextBlock)_pauseButton.Content!).Text = S.Paused ? "Продолжить" : "Пауза";
-            _pauseButton.Background = S.Paused ? Theme.Orange : Theme.Yellow;
-            _pauseButton.Foreground = S.Paused ? Brushes.White : Theme.Bg;
+            _pauseButton.Background = S.Paused ? Ui.Orange : Ui.Yellow;
+            _pauseButton.Foreground = S.Paused ? Brushes.White : Ui.Bg;
 
             _chips.Children.Clear();
             if (ctl != null)
@@ -347,9 +347,9 @@ public sealed class SettingsWindow : Window
                 foreach (var l in ctl.Engine.Layouts)
                 {
                     bool cur = l.Id == ctl.Engine.CurrentLayout.Id;
-                    _chips.Children.Add(Theme.Chip(l.Language == "tg" ? "TJ" : l.Language.ToUpperInvariant(), cur ? Theme.Yellow : null));
+                    _chips.Children.Add(Ui.Chip(l.Language == "tg" ? "TJ" : l.Language.ToUpperInvariant(), cur ? Ui.Yellow : null));
                 }
-                _chips.Children.Add(Theme.Chip($"исправлено {_app.CorrectionsCount}"));
+                _chips.Children.Add(Ui.Chip($"исправлено {_app.CorrectionsCount}"));
             }
 
             _exceptionsList.Children.Clear();

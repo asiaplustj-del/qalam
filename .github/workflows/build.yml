@@ -18,8 +18,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with: { dotnet-version: '8.0.x' }
       - name: Engine simulation
         working-directory: tests/Qalam.Sim
@@ -29,8 +29,8 @@ jobs:
     runs-on: windows-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with: { dotnet-version: '8.0.x' }
       - name: Version
         shell: bash
@@ -62,14 +62,14 @@ jobs:
             out/*-windows-portable.zip
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-latest
     needs: test
     strategy:
       matrix:
         rid: [ osx-arm64, osx-x64 ]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with: { dotnet-version: '8.0.x' }
       - name: Version
         run: |

@@ -28,7 +28,7 @@ public sealed class QalamApp : Application
     public override void Initialize()
     {
         RequestedThemeVariant = ThemeVariant.Dark;
-        Resources["SystemAccentColor"] = Theme.OrangeC;
+        Resources["SystemAccentColor"] = Ui.OrangeC;
         Resources["SystemAccentColorLight1"] = Color.Parse("#F57A42");
         Resources["SystemAccentColorLight2"] = Color.Parse("#F7966A");
         Resources["SystemAccentColorLight3"] = Color.Parse("#FAB492");
