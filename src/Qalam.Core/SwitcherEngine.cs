@@ -32,6 +32,7 @@ public sealed class SwitcherEngine
     private int _manualStep;                // repeated manual presses cycle through layouts
     private KeyboardLayout? _manualOrigin;
     private bool _manualActive;
+    private string? _manualVariant, _manualOnScreen;
 
     public IReadOnlyList<KeyboardLayout> Layouts { get; set; }
     public KeyboardLayout CurrentLayout { get; set; }
@@ -39,6 +40,14 @@ public sealed class SwitcherEngine
     public bool Paused { get; set; }
     /// <summary>Learn an exception when the user undoes an automatic correction.</summary>
     public bool LearnFromUndo { get; set; } = true;
+    /// <summary>"хамчун" → "ҳамчун" when the word only exists with Tajik letters.</summary>
+    public bool RestoreTajik { get; set; } = true;
+
+    private readonly System.Text.StringBuilder _committed = new();   // finished text of the current field
+    /// <summary>What the user has typed in the current text field (best effort, max ~2000 chars).</summary>
+    public string FieldText => _committed + CurrentWordText;
+    public string? ContextLanguage => _contextLang;
+    public bool WordInProgress => _word.Count > 0;
 
     public Detector Detector => _detector;
     public event Action<Correction>? Corrected;
@@ -64,6 +73,7 @@ public sealed class SwitcherEngine
         _undoAvailable = false;
         _manualActive = false;
         if (_word.Count > 0) { _word.RemoveAt(_word.Count - 1); return; }
+        if (_committed.Length > 0) _committed.Length--;
         if (_boundaryLeft > 0)
         {
             _boundaryLeft--;
@@ -85,6 +95,7 @@ public sealed class SwitcherEngine
         _manualActive = false;
         Correction? result = null;
         bool converted = false;
+        _wordRenderLen = CurrentLayout.Render(_word).Length;
         if (_word.Count > 0 && AutoMode && !Paused)
         {
             var d = _detector.Decide(CurrentLayout, Layouts, _word, _contextLang);
@@ -107,6 +118,17 @@ public sealed class SwitcherEngine
                 CurrentLayout = d.Layout;
                 converted = true;
                 _contextLang = d.Layout.Language;
+                Corrected?.Invoke(result);
+            }
+            else if (RestoreTajik && CurrentLayout.Language is "ru" or "tg"
+                     && _detector.RestoreTajik(CurrentLayout.Render(_word), _contextLang) is { } fixedText)
+            {
+                var from = CurrentLayout.Render(_word);
+                result = new Correction(from.Length, fixedText + boundary, null, CorrectionKind.Auto, from, fixedText);
+                _lastAuto = result; _lastAutoBoundary = boundary; _lastAutoOrigLayout = CurrentLayout;
+                _undoAvailable = true;
+                converted = true;
+                _contextLang = "tg";
                 Corrected?.Invoke(result);
             }
             else
@@ -135,10 +157,25 @@ public sealed class SwitcherEngine
             _lastLayout = CurrentLayout;
             _lastConverted = converted;
         }
+        if (result != null) { Trim(result.From.Length - _wordRenderLen);   // retro: previous word is already committed
+ _committed.Append(result.Insert); }
+        else _committed.Append(CurrentLayout.Render(_word)).Append(boundary);
+        if (_committed.Length > 2000) _committed.Remove(0, _committed.Length - 1500);
         _lastBoundary = boundary;
         _boundaryLeft = boundary.Length;
         _word.Clear();
         return result;
+    }
+
+    private int _wordRenderLen;
+    private void Trim(int n) { if (n > 0) _committed.Length = Math.Max(0, _committed.Length - n); }
+
+    /// <summary>A completion was accepted: the current word was replaced by <paramref name="text"/>.</summary>
+    public void AcceptCompletion(string text)
+    {
+        _committed.Append(text);
+        _word.Clear(); _lastWord = new(); _boundaryLeft = 0;
+        _undoAvailable = false; _manualActive = false;
     }
 
     /// <summary>
@@ -154,6 +191,7 @@ public sealed class SwitcherEngine
             _undoAvailable = false;
             var undo = new Correction(a.Insert.Length, a.From + _lastAutoBoundary, orig, CorrectionKind.Undo, a.To, a.From);
             if (LearnFromUndo) _detector.User.AddException(a.From);
+            Trim(a.Insert.Length); _committed.Append(a.From).Append(_lastAutoBoundary);
             CurrentLayout = orig;
             _lastLayout = orig;
             Corrected?.Invoke(undo);
@@ -166,15 +204,26 @@ public sealed class SwitcherEngine
         { strokes = _lastWord; tail = _lastBoundary; CurrentLayout = _lastLayout; }
         else return null;
 
-        if (!_manualActive) { _manualActive = true; _manualStep = 0; _manualOrigin = CurrentLayout; }
+        if (!_manualActive)
+        {
+            _manualActive = true; _manualStep = 0; _manualOrigin = CurrentLayout;
+            _manualVariant = RestoreTajik && CurrentLayout.Language is "ru" or "tg"
+                ? _detector.BestTajikVariant(CurrentLayout.Render(strokes)) : null;
+            _manualOnScreen = CurrentLayout.Render(strokes);
+        }
         var order = ManualOrder(strokes, _manualOrigin!);
-        if (order.Count == 0) return null;
-        var target = order[_manualStep % order.Count];
+        // step 0: Tajik letters ("ки" → "кӣ") if possible, then layouts EN → RU → TJ → back
+        var steps = new List<(KeyboardLayout Layout, string Text, bool Variant)>();
+        if (_manualVariant != null) steps.Add((_manualOrigin!, _manualVariant, true));
+        foreach (var l in order) steps.Add((l, l.Render(strokes), false));
+        if (_manualVariant != null && order.Count == 0) steps.Add((_manualOrigin!, _manualOrigin!.Render(strokes), false));
+        if (steps.Count == 0) return null;
+        var (target, toText, isVariant) = steps[_manualStep % steps.Count];
         _manualStep++;
 
-        var fromText = CurrentLayout.Render(strokes);
-        var toText = target.Render(strokes);
-        var c = new Correction(fromText.Length + tail.Length, toText + tail, target, CorrectionKind.Manual, fromText, toText);
+        var fromText = _manualOnScreen ?? CurrentLayout.Render(strokes);
+        var c = new Correction(fromText.Length + tail.Length, toText + tail, isVariant ? null : target, CorrectionKind.Manual, fromText, toText);
+        _manualOnScreen = toText;
         CurrentLayout = target;
         if (tail.Length > 0) _lastLayout = target;
         _undoAvailable = false;
@@ -243,7 +292,7 @@ public sealed class SwitcherEngine
     /// <summary>Mouse click, focus change, arrows, Ctrl+… — context is lost.</summary>
     public void Reset()
     {
-        _word.Clear(); _lastWord = new(); _boundaryLeft = 0; _contextLang = null; _lastConverted = false;
+        _word.Clear(); _lastWord = new(); _boundaryLeft = 0; _contextLang = null; _lastConverted = false; _committed.Clear();
         _undoAvailable = false; _manualActive = false;
     }
 }

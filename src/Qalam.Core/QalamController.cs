@@ -11,6 +11,16 @@ public sealed class QalamController : IDisposable
     public QalamSettings Settings { get; }
 
     public event Action<Correction>? Corrected;
+
+    // ---------- suggestions (word completion + neural phrases) ----------
+    public sealed record Suggestion(string Text, int Erase, string Insert, bool IsPhrase, IReadOnlyList<string> Alternatives, long Version);
+    /// <summary>Show/hide the suggestion popup (null = hide). Raised on the hook thread.</summary>
+    public event Action<Suggestion?>? SuggestionChanged;
+    /// <summary>The user finished a word: a neural module may propose a continuation of <c>text</c>.</summary>
+    public event Action<long, string>? PhraseOpportunity;
+    public Suggestion? CurrentSuggestion { get; private set; }
+    public Completer Completer { get; }
+    private long _version;
     /// <summary>Raised after <see cref="StartRecording"/>: the combo pressed, or null if cancelled (Esc).</summary>
     public event Action<KeyCombo?>? Recorded;
     public bool Recording { get; private set; }
@@ -36,9 +46,10 @@ public sealed class QalamController : IDisposable
     public QalamController(IKeyboardPlatform platform, SwitcherEngine engine, QalamSettings settings)
     {
         _platform = platform; Engine = engine; Settings = settings;
+        Completer = new Completer(engine.Detector);
         ApplySettings();
         platform.KeyHandler = OnKey;
-        platform.MouseClicked += () => Engine.Reset();
+        platform.MouseClicked += () => { lock (_sync) { Engine.Reset(); ClearSuggestion(); } };
     }
 
     public void ApplySettings()
@@ -46,6 +57,8 @@ public sealed class QalamController : IDisposable
         Engine.AutoMode = Settings.AutoMode;
         Engine.Paused = Settings.Paused;
         Engine.LearnFromUndo = Settings.LearnFromUndo;
+        Engine.RestoreTajik = Settings.RestoreTajik;
+        Completer.UseTajikLetters = Settings.RestoreTajik;
         var o = Engine.Detector.Options;
         o.NgramMargin = Settings.Sensitivity switch { 1 => 2.8, 3 => 1.7, _ => 2.2 };
         o.FixSingleLetters = Settings.FixSingleLetters;
@@ -80,8 +93,77 @@ public sealed class QalamController : IDisposable
 
     private bool OnKey(KeyInput k)
     {
-        try { lock (_sync) return Handle(k); }
+        try { lock (_sync) return HandleWithSuggestions(k); }
         catch { Engine.Reset(); return false; }
+    }
+
+    private bool HandleWithSuggestions(KeyInput k)
+    {
+        bool isModifier = k.Special is SpecialKey.Shift or SpecialKey.Ctrl or SpecialKey.Alt or SpecialKey.Meta;
+        if (!k.IsDown || isModifier) return Handle(k);
+
+        // Tab accepts the visible suggestion
+        if (k.Special == SpecialKey.Tab && !k.Ctrl && !k.Alt && !k.Meta && !k.Shift && CurrentSuggestion is { } sug && !Recording)
+        {
+            _platform.Replace(sug.Erase, sug.Insert);
+            Engine.AcceptCompletion(sug.Insert);
+            _swallowUp = "Tab";
+            _version++;
+            ClearSuggestion();
+            return true;
+        }
+
+        bool swallowed = Handle(k);
+        _version++;
+        if (Settings.Paused || Recording) { ClearSuggestion(); return swallowed; }
+        switch (k.Special)
+        {
+            case SpecialKey.None when !(k.Ctrl || k.Alt || k.Meta):
+            case SpecialKey.Backspace:
+                UpdateWordSuggestion();
+                break;
+            case SpecialKey.Space:
+                ClearSuggestion();
+                if (Settings.NeuralEnabled && !_excludedCache) PhraseOpportunity?.Invoke(_version, Engine.FieldText);
+                break;
+            default:
+                ClearSuggestion();
+                break;
+        }
+        return swallowed;
+    }
+
+    private void UpdateWordSuggestion()
+    {
+        if (!Settings.WordCompletion || _excludedCache || !Engine.WordInProgress) { ClearSuggestion(); return; }
+        var typed = Engine.CurrentWordText;
+        var list = Completer.Complete(typed, Engine.CurrentLayout, Engine.ContextLanguage);
+        if (list.Count == 0) { ClearSuggestion(); return; }
+        SetSuggestion(new Suggestion(list[0].Word, typed.Length, list[0].Word, false,
+            list.Skip(1).Select(c => c.Word).ToList(), _version));
+    }
+
+    /// <summary>Called by the neural module when its answer arrives; ignored if the user kept typing.</summary>
+    public void OfferPhrase(long version, string text)
+    {
+        lock (_sync)
+        {
+            if (version != _version || Engine.WordInProgress || Settings.Paused || string.IsNullOrWhiteSpace(text)) return;
+            SetSuggestion(new Suggestion(text, 0, text, true, Array.Empty<string>(), version));
+        }
+    }
+
+    private void SetSuggestion(Suggestion s)
+    {
+        CurrentSuggestion = s;
+        SuggestionChanged?.Invoke(s);
+    }
+
+    private void ClearSuggestion()
+    {
+        if (CurrentSuggestion == null) return;
+        CurrentSuggestion = null;
+        SuggestionChanged?.Invoke(null);
     }
 
     private bool Handle(KeyInput k)

@@ -116,8 +116,81 @@ void Check(string name, bool ok) { Console.WriteLine($"  {(ok ? "OK  " : "FAIL")
     Check("Esc cancels recording", got == null && !ctl.Recording);
 
     fp.Screen.Clear(); fp.Click(); fp.Current = L["ru"];
+    var cq = new KeyInput(true, SpecialKey.Other, Ctrl: true, Shift: true, KeyName: "Q");   // manual hotkey is the custom combo now
+    fp.Type("ки", L["ru"]); fp.KeyHandler!(cq); fp.KeyHandler!(cq with { IsDown = false });
+    Check($"manual Tajik letters ки→кӣ: '{fp.Screen}'", fp.Screen.ToString() == "кӣ");
+    fp.KeyHandler!(cq); fp.KeyHandler!(cq with { IsDown = false });
+    Check($"second press → other layout: '{fp.Screen}'", fp.Screen.ToString() == "rb");
+
+    fp.Screen.Clear(); fp.Click(); fp.Current = L["ru"];
     fp.Type("ҳамчун ", L["tg"]);
     Check($"tajik in RU layout: '{fp.Screen}'", fp.Screen.ToString() == "ҳамчун " && fp.Current.Language == "tg");
+}
+
+// ---------- Tajik letters typed with Russian look-alikes ----------
+Console.WriteLine("\n=== Tajik letters restoration (ҳ→х, ҷ→ч, қ→к, ғ→г, ӯ→у, ӣ→и) ===");
+{
+    var back = new Dictionary<char, char> { ['ҳ'] = 'х', ['ҷ'] = 'ч', ['қ'] = 'к', ['ғ'] = 'г', ['ӯ'] = 'у', ['ӣ'] = 'и', ['Ҳ'] = 'Х', ['Ҷ'] = 'Ч', ['Қ'] = 'К', ['Ғ'] = 'Г', ['Ӯ'] = 'У', ['Ӣ'] = 'И' };
+    int words = 0, fixedOk = 0, needed = 0, broken = 0; var ex = new List<string>();
+    foreach (var line in File.ReadAllLines(Path.Combine(dir, "lines_tg.txt")).Take(400))
+    {
+        var plain = new string(line.Select(c => back.GetValueOrDefault(c, c)).ToArray());
+        var eng = new SwitcherEngine(det, layouts, L["ru"]);
+        var screen = new System.Text.StringBuilder();
+        foreach (var ch in plain + " ")
+        {
+            if (ch == ' ') { var c = eng.Boundary(" "); if (c != null) { screen.Length -= c.Erase; screen.Append(c.Insert); } else screen.Append(' '); continue; }
+            if (!L["ru"].TryEncode(ch.ToString(), out var st) || st[0].Key == '\0') { screen.Append(ch); continue; }
+            screen.Append(eng.CurrentLayout.Render(st[0])); eng.Key(st[0]);
+        }
+        var orig = line.Split(' '); var typed = plain.Split(' '); var got = screen.ToString().TrimEnd().Split(' ');
+        for (int i = 0; i < orig.Length && i < got.Length; i++)
+        {
+            words++;
+            bool need = orig[i] != typed[i];
+            if (need) { needed++; if (got[i] == orig[i]) fixedOk++; else if (ex.Count < 14) ex.Add($"{got[i]}({orig[i]})"); }
+            else if (got[i] != orig[i]) { broken++; if (ex.Count < 14) ex.Add($"!{got[i]}({orig[i]})"); }
+        }
+    }
+    Console.WriteLine($"  words {words}: needed fix {needed}, fixed {fixedOk} ({100.0 * fixedOk / Math.Max(1, needed):F1}%), broken good words {broken}  {string.Join(" ", ex)}");
+    if (broken * 200 > words) failures++;
+}
+
+// ---------- word completion through the controller ----------
+Console.WriteLine("\n=== Word completion ===");
+{
+    var fp = new FakePlatform(layouts);
+    var settings = new QalamSettings { ExcludedApps = new() };
+    var ctl = new QalamController(fp, new SwitcherEngine(new Detector(models), layouts, layouts[1]), settings);
+    QalamController.Suggestion? shown = null;
+    ctl.SuggestionChanged += s => shown = s;
+    fp.Current = L["ru"];
+    fp.Type("Здравс", L["ru"]);
+    Check($"suggestion shown: {shown?.Text}", shown?.Text == "Здравствуйте");
+    fp.PressTab();
+    Check($"Tab accepts: '{fp.Screen}'", fp.Screen.ToString() == "Здравствуйте" && shown == null);
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("точик", L["ru"]);
+    Check($"Tajik via look-alikes: {shown?.Text}", shown?.Text?.StartsWith("тоҷик") == true);
+    fp.Type("и ", L["ru"]);
+    Check($"ignored by typing on: '{fp.Screen}'", shown == null);
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("как", L["ru"]);
+    Check($"no suggestion for a common short word: {shown?.Text ?? "-"}", shown == null);
+    fp.PressTab();
+    Check("Tab passes through without suggestion", fp.Screen.ToString() == "как\t");
+    long ver = 0; string? ctxText = null;
+    settings.NeuralEnabled = true;
+    ctl.PhraseOpportunity += (v, t) => { ver = v; ctxText = t; };
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("мы снимаем ", L["ru"]);
+    Check($"phrase opportunity with context '{ctxText}'", ctxText == "мы снимаем ");
+    ctl.OfferPhrase(ver, "новый фильм");
+    Check($"phrase offered: {shown?.Text}", shown?.IsPhrase == true);
+    fp.PressTab();
+    Check($"phrase accepted: '{fp.Screen}'", fp.Screen.ToString() == "мы снимаем новый фильм");
+    ctl.OfferPhrase(ver, "устаревший ответ");
+    Check("stale neural answer ignored", shown == null);
 }
 
 Console.WriteLine(failures == 0 ? "\nQUALITY OK" : $"\nQUALITY FAILED ({failures})");

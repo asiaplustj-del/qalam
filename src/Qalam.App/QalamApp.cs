@@ -17,6 +17,8 @@ public sealed class QalamApp : Application
     public IKeyboardPlatform? Platform { get; private set; }
     public QalamSettings Settings { get; private set; } = QalamSettings.Load();
     public int CorrectionsCount { get; private set; }
+    public NeuralService? Neural { get; private set; }
+    private SuggestionPopup? _popup;
     public event Action? Changed;
 
     private TrayIcon? _tray;
@@ -53,7 +55,12 @@ public sealed class QalamApp : Application
     private async Task InitEngineAsync()
     {
         // dictionaries load in ~1 s; keep the UI responsive meanwhile
-        var models = await Task.Run(() => new[] { "en", "ru", "tg" }.Select(LanguageModel.LoadEmbedded).ToList());
+        var models = await Task.Run(() =>
+        {
+            var list = new[] { "en", "ru", "tg" }.Select(LanguageModel.LoadEmbedded).ToList();
+            foreach (var m in list) m.Warmup();   // prefix index for word completion
+            return list;
+        });
         var user = UserDictionary.Load(Path.Combine(QalamSettings.DataDir, "user.json"));
         var detector = new Detector(models, user);
 
@@ -78,6 +85,10 @@ public sealed class QalamApp : Application
         Platform = platform;
         Controller.Corrected += c => Dispatcher.UIThread.Post(() => OnCorrected(c));
         Controller.StateChanged += () => Dispatcher.UIThread.Post(UpdateState);
+        Neural = new NeuralService(Settings);
+        _ = Neural.RefreshAsync().ContinueWith(_ => Dispatcher.UIThread.Post(() => Changed?.Invoke()));
+        Controller.SuggestionChanged += sug => Dispatcher.UIThread.Post(() => OnSuggestion(sug));
+        Controller.PhraseOpportunity += (v, text) => Neural.OnPhraseOpportunity(Controller, v, text);
 
         if (platform.HasPermissions()) platform.Start();
         else
@@ -96,6 +107,22 @@ public sealed class QalamApp : Application
         }
         platform.SetStartWithSystem(Settings.StartWithSystem);
         UpdateState();
+    }
+
+    private void OnSuggestion(QalamController.Suggestion? sug)
+    {
+        _popup ??= new SuggestionPopup();
+        if (sug == null) { _popup.Hide(); return; }
+        // give the target app a moment to move its caret after the keystroke
+        DispatcherTimer.RunOnce(() =>
+        {
+            if (Controller?.CurrentSuggestion != sug) return;
+            var caret = Platform?.GetCaretRect();
+            if (caret is not { } c) { _popup.Hide(); return; }
+            double scale = OperatingSystem.IsMacOS() ? (_popup.Screens.Primary?.Scaling ?? 1) : 1;  // macOS reports points
+            var pos = new PixelPoint((int)(c.X * scale), (int)((c.Y + c.H + 4) * scale));
+            _popup.ShowSuggestion(sug, pos);
+        }, TimeSpan.FromMilliseconds(30));
     }
 
     private static WindowIcon LoadIcon(string name)

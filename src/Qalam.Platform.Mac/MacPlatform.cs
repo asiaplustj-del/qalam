@@ -338,6 +338,46 @@ public sealed class MacPlatform : IKeyboardPlatform
         catch { return null; }
     }
 
+    private static readonly IntPtr AXFocused = CFStr("AXFocusedUIElement");
+    private static readonly IntPtr AXSelRange = CFStr("AXSelectedTextRange");
+    private static readonly IntPtr AXBoundsForRange = CFStr("AXBoundsForRange");
+
+    /// <summary>Caret rectangle in POINTS (macOS global coordinates, top-left origin).</summary>
+    public (int X, int Y, int W, int H)? GetCaretRect()
+    {
+        IntPtr sys = IntPtr.Zero, focused = IntPtr.Zero, rangeVal = IntPtr.Zero, bounds = IntPtr.Zero;
+        try
+        {
+            sys = AXUIElementCreateSystemWide();
+            if (AXUIElementCopyAttributeValue(sys, AXFocused, out focused) != 0 || focused == IntPtr.Zero) return null;
+            if (AXUIElementCopyAttributeValue(focused, AXSelRange, out rangeVal) != 0 || rangeVal == IntPtr.Zero) return null;
+            if (AXUIElementCopyParameterizedAttributeValue(focused, AXBoundsForRange, rangeVal, out bounds) == 0
+                && bounds != IntPtr.Zero && AXValueGetValue(bounds, kAXValueCGRectType, out CGRect r) && r.H > 0)
+                return ((int)r.X, (int)r.Y, Math.Max((int)r.W, 1), (int)r.H);
+            // empty selection: some apps only give bounds for a real character → take the previous one
+            if (AXValueGetValue(rangeVal, kAXValueCFRangeType, out CFRange range) && range.location > 0)
+            {
+                var prev = new CFRange { location = range.location - 1, length = 1 };
+                var pv = AXValueCreate(kAXValueCFRangeType, ref prev);
+                if (bounds != IntPtr.Zero) { CFRelease(bounds); bounds = IntPtr.Zero; }
+                CGRect r2 = default;
+                bool ok = AXUIElementCopyParameterizedAttributeValue(focused, AXBoundsForRange, pv, out bounds) == 0
+                          && bounds != IntPtr.Zero && AXValueGetValue(bounds, kAXValueCGRectType, out r2) && r2.H > 0;
+                CFRelease(pv);
+                if (ok) return ((int)(r2.X + r2.W), (int)r2.Y, 1, (int)r2.H);
+            }
+            return null;
+        }
+        catch { return null; }
+        finally
+        {
+            if (bounds != IntPtr.Zero) CFRelease(bounds);
+            if (rangeVal != IntPtr.Zero) CFRelease(rangeVal);
+            if (focused != IntPtr.Zero) CFRelease(focused);
+            if (sys != IntPtr.Zero) CFRelease(sys);
+        }
+    }
+
     public void SetStartWithSystem(bool enabled)
     {
         try

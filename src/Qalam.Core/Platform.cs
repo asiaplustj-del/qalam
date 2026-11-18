@@ -45,5 +45,7 @@ public interface IKeyboardPlatform : IDisposable
     void ConvertSelection(Func<string, string?> convert);
 
     string? ForegroundApp();
+    /// <summary>Text caret rectangle on screen in physical pixels (top-left origin), or null if unknown.</summary>
+    (int X, int Y, int W, int H)? GetCaretRect();
     void SetStartWithSystem(bool enabled);
 }

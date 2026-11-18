@@ -20,6 +20,7 @@ sealed class FakePlatform : IKeyboardPlatform
     public void ReplayKey(SpecialKey k) => Screen.Append(k switch { SpecialKey.Space => " ", SpecialKey.Enter => "\n", _ => "\t" });
     public void ConvertSelection(Func<string, string?> convert) { var r = convert(Screen.ToString()); if (r != null) { Screen.Clear(); Screen.Append(r); } }
     public string? ForegroundApp() => "Notepad";
+    public (int X, int Y, int W, int H)? GetCaretRect() => (100, 100, 1, 16);
     public void SetStartWithSystem(bool e) { }
     public void Dispose() { }
     public void Click() => MouseClicked?.Invoke();
@@ -30,6 +31,7 @@ sealed class FakePlatform : IKeyboardPlatform
     {
         if (k.Special == SpecialKey.None) { var c = Current.Render(new KeyStroke(k.PhysicalKey, k.Shift, k.Caps)); if (c != '\0') Screen.Append(c); }
         else if (k.Special == SpecialKey.Space) Screen.Append(' ');
+        else if (k.Special == SpecialKey.Tab) Screen.Append('\t');
         else if (k.Special == SpecialKey.Backspace && Screen.Length > 0) Screen.Length--;
     }
     /// <summary>Type text as if the user's fingers were on <paramref name="intended"/> layout.</summary>
@@ -42,5 +44,6 @@ sealed class FakePlatform : IKeyboardPlatform
             Press(new KeyInput(true, SpecialKey.None, st[0].Key, st[0].Shift));
         }
     }
+    public void PressTab() => Press(new KeyInput(true, SpecialKey.Tab, KeyName: "Tab"));
     public void Tap(SpecialKey mod) { KeyHandler?.Invoke(new KeyInput(true, mod)); KeyHandler?.Invoke(new KeyInput(false, mod)); }
 }

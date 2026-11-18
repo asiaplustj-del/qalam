@@ -136,6 +136,61 @@ public sealed class Detector
         return Core(cur.Text).Length <= 4 && fa >= fc - 0.5;
     }
 
+    /// <summary>
+    /// "хамчун" → "ҳамчун": returns the corrected token, or null. A word that is already a valid
+    /// Tajik spelling ("ки") is never touched; a valid Russian word only inside Tajik text.
+    /// </summary>
+    public string? RestoreTajik(string text, string? contextLanguage)
+    {
+        var tg = Model("tg");
+        if (tg == null) return null;
+        var core = Core(text);
+        if (core.Length < 2 || User.IsException(text) || LooksTechnical(text)) return null;
+        var lower = core.ToLowerInvariant();
+        if (!TajikLetters.HasCandidates(lower) || lower.Any(c => c is >= 'a' and <= 'z')) return null;
+        if (User.IsKnown(core)) return null;
+        // "ки", "чой" are already Tajik; but the dictionary also has rare look-alike spellings
+        // ("хамчун" from old texts) — those lose to a much more common Tajik spelling
+        var own = tg.Exact(lower) ?? tg.Frequency(lower);
+        string? best = null; float bestZ = float.MinValue;
+        foreach (var v in TajikLetters.Variants(lower))
+        {
+            var z = tg.Exact(v) ?? tg.Frequency(v);
+            if (z is { } f && f > bestZ) { bestZ = f; best = v; }
+        }
+        if (best == null || bestZ < 2.2f) return null;
+        if (own is { } o && bestZ - o < 1.5f) return null;
+        var ru = Model("ru")?.Frequency(lower);
+        if (ru is { } fr)
+        {
+            // "хам", "чаи"… are Russian too — only fix them inside Tajik text
+            bool ok = contextLanguage == "tg" ? bestZ - fr >= 1.0f
+                    : contextLanguage == null && bestZ - fr >= 2.5f;   // "хар" → "ҳар" even at the start
+            if (!ok) return null;
+        }
+        else if (contextLanguage is "ru" && bestZ < 3.5f) return null;
+        int a = text.IndexOf(core, StringComparison.Ordinal);
+        return text[..a] + TajikLetters.MatchCase(core, best) + text[(a + core.Length)..];
+    }
+
+    /// <summary>Most common Tajik spelling with restored letters, ignoring thresholds (for the manual hotkey: "ки" → "кӣ").</summary>
+    public string? BestTajikVariant(string text)
+    {
+        var tg = Model("tg");
+        var core = Core(text);
+        if (tg == null || core.Length == 0) return null;
+        var lower = core.ToLowerInvariant();
+        string? best = null; float bestZ = float.MinValue;
+        foreach (var v in TajikLetters.Variants(lower))
+        {
+            var z = tg.Exact(v) ?? tg.Frequency(v);
+            if (z is { } f && f > bestZ) { bestZ = f; best = v; }
+        }
+        if (best == null) return null;
+        int a = text.IndexOf(core, StringComparison.Ordinal);
+        return text[..a] + TajikLetters.MatchCase(core, best) + text[(a + core.Length)..];
+    }
+
     /// <summary>Letters of the token without surrounding punctuation.</summary>
     public static string Core(string text)
     {

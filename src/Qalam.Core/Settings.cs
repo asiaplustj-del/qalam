@@ -58,6 +58,17 @@ public sealed class QalamSettings
     public bool LearnFromUndo { get; set; } = true;
     public bool Sound { get; set; }
     public bool FixSingleLetters { get; set; } = true;
+    /// <summary>"хамчун" → "ҳамчун".</summary>
+    public bool RestoreTajik { get; set; } = true;
+    /// <summary>Dictionary word completion, accepted with Tab.</summary>
+    public bool WordCompletion { get; set; } = true;
+
+    // ---- optional neural module (local model via Ollama) ----
+    public bool NeuralEnabled { get; set; }
+    public string NeuralUrl { get; set; } = "http://localhost:11434";
+    public string NeuralModel { get; set; } = "gemma3:1b";
+    /// <summary>Pause after a space before asking the model, ms.</summary>
+    public int NeuralDelayMs { get; set; } = 400;
     /// <summary>1 = careful … 3 = aggressive (n-gram margin for unknown words).</summary>
     public int Sensitivity { get; set; } = 2;
 

@@ -61,6 +61,16 @@ internal static class Native
                                             ref uint deadKeyState, nuint maxLen, out nuint actualLen, [Out] char[] buf);
 
     [DllImport(AS)] public static extern bool AXIsProcessTrusted();
+    [DllImport(AS)] public static extern IntPtr AXUIElementCreateSystemWide();
+    [DllImport(AS)] public static extern int AXUIElementCopyAttributeValue(IntPtr element, IntPtr attribute, out IntPtr value);
+    [DllImport(AS)] public static extern int AXUIElementCopyParameterizedAttributeValue(IntPtr element, IntPtr attribute, IntPtr parameter, out IntPtr value);
+    [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CGRect rect);
+    [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CFRange range);
+    [DllImport(AS)] public static extern IntPtr AXValueCreate(int type, ref CFRange range);
+    public const int kAXValueCGRectType = 3, kAXValueCFRangeType = 4;
+    [StructLayout(LayoutKind.Sequential)] public struct CGRect { public double X, Y, W, H; }
+    [DllImport(CF)] public static extern IntPtr CFStringCreateWithCString(IntPtr alloc, string s, uint encoding);
+    public static IntPtr CFStr(string s) => CFStringCreateWithCString(IntPtr.Zero, s, 0x08000100);
 
     [DllImport(ObjC)] public static extern IntPtr objc_getClass(string name);
     [DllImport(ObjC)] public static extern IntPtr sel_registerName(string name);

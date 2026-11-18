@@ -20,6 +20,26 @@ public sealed class LanguageModel
 
     public int WordCount => _words.Count;
 
+    /// <summary>Exact dictionary lookup (no morphology), Zipf or null.</summary>
+    public float? Exact(string lower) => _words.TryGetValue(lower, out var z) ? z : null;
+
+    /// <summary>Builds the prefix index ahead of time (call from a background thread).</summary>
+    public void Warmup() { foreach (var _ in WithPrefix("\uFFFF", 1)) { } }
+
+    private string[]? _sorted;
+    private readonly object _sortLock = new();
+
+    /// <summary>Words starting with <paramref name="prefix"/> (lower case), scanned in alphabetical order.</summary>
+    public IEnumerable<(string Word, float Zipf)> WithPrefix(string prefix, int maxScan = 30000)
+    {
+        if (_sorted == null) lock (_sortLock) _sorted ??= _words.Keys.OrderBy(w => w, StringComparer.Ordinal).ToArray();
+        var arr = _sorted;
+        int lo = 0, hi = arr.Length;
+        while (lo < hi) { int mid = (lo + hi) / 2; if (string.CompareOrdinal(arr[mid], prefix) < 0) lo = mid + 1; else hi = mid; }
+        for (int i = lo, n = 0; i < arr.Length && n < maxScan && arr[i].StartsWith(prefix, StringComparison.Ordinal); i++, n++)
+            yield return (arr[i], _words[arr[i]]);
+    }
+
     public LanguageModel(string language, IEnumerable<(string Word, float Zipf)> words)
     {
         Language = language;

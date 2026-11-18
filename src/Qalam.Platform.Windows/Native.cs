@@ -59,6 +59,44 @@ internal static class Native
     public static extern int ToUnicodeEx(uint vk, uint scan, byte[] state, [Out] char[] buf, int bufSize, uint flags, IntPtr hkl);
     [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
 
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GUITHREADINFO
+    {
+        public int cbSize; public uint flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+        public RECT rcCaret;
+    }
+    [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint threadId, ref GUITHREADINFO info);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref POINT pt);
+    public const uint OBJID_CARET = 0xFFFFFFF8;
+    public static Guid IID_IAccessible = new("618736E0-3C3D-11CF-810C-00AA00389B71");
+    [DllImport("oleacc.dll")]
+    public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint id, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out object? obj);
+
+    /// <summary>Prefix of the IAccessible vtable, up to accLocation (only that one is called).</summary>
+    [ComImport, Guid("618736E0-3C3D-11CF-810C-00AA00389B71"), InterfaceType(ComInterfaceType.InterfaceIsDual)]
+    public interface IAccessible
+    {
+        [return: MarshalAs(UnmanagedType.IDispatch)] object get_accParent();
+        int get_accChildCount();
+        [return: MarshalAs(UnmanagedType.IDispatch)] object get_accChild([MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.BStr)] string get_accName([MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.BStr)] string get_accValue([MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.BStr)] string get_accDescription([MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.Struct)] object get_accRole([MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.Struct)] object get_accState([MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.BStr)] string get_accHelp([MarshalAs(UnmanagedType.Struct)] object child);
+        int get_accHelpTopic([MarshalAs(UnmanagedType.BStr)] out string file, [MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.BStr)] string get_accKeyboardShortcut([MarshalAs(UnmanagedType.Struct)] object child);
+        [return: MarshalAs(UnmanagedType.Struct)] object get_accFocus();
+        [return: MarshalAs(UnmanagedType.Struct)] object get_accSelection();
+        [return: MarshalAs(UnmanagedType.BStr)] string get_accDefaultAction([MarshalAs(UnmanagedType.Struct)] object child);
+        void accSelect(int flags, [MarshalAs(UnmanagedType.Struct)] object child);
+        void accLocation(out int left, out int top, out int width, out int height, [MarshalAs(UnmanagedType.Struct)] object child);
+    }
+
     [DllImport("user32.dll")] public static extern bool OpenClipboard(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool CloseClipboard();
     [DllImport("user32.dll")] public static extern bool EmptyClipboard();

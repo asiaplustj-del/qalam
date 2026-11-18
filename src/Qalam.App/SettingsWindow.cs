@@ -54,6 +54,8 @@ public sealed class SettingsWindow : Window
         root.Children.Add(BuildStatusCard());
         root.Children.Add(BuildHotkeysCard());
         root.Children.Add(BuildBehaviourCard());
+        root.Children.Add(BuildSuggestCard());
+        root.Children.Add(BuildNeuralCard());
         root.Children.Add(BuildLayoutsCard());
         root.Children.Add(BuildExceptionsCard());
         root.Children.Add(BuildAppsCard());
@@ -273,6 +275,124 @@ public sealed class SettingsWindow : Window
         return Ui.Row(label, hint, sw);
     }
 
+    // ------------------------------------------------------------------ suggestions
+    private Control BuildSuggestCard()
+    {
+        var p = new StackPanel();
+        p.Children.Add(Ui.Caption("Подсказки и таджикские буквы"));
+        p.Children.Add(BoolRow("Дописывать слова", "Под курсором появляется подсказка: «точик» → «тоҷикистон». Tab — принять, просто печатайте дальше — игнорировать. Работает по словарю, без интернета и нейросети.",
+            S.WordCompletion, v => S.WordCompletion = v));
+        p.Children.Add(BoolRow("Восстанавливать таджикские буквы", "«хамчун» → «ҳамчун», «чахон» → «ҷаҳон», «точикистон» → «тоҷикистон». Слова, которые и так правильные («ки», «кор»), не трогаются. Отменить — той же клавишей, что и исправление.",
+            S.RestoreTajik, v => S.RestoreTajik = v));
+        return Ui.CardBox(p);
+    }
+
+    // ------------------------------------------------------------------ neural module
+    private readonly TextBlock _neuralStatus = new() { FontSize = 13, Foreground = Ui.Muted, TextWrapping = TextWrapping.Wrap };
+    private readonly ComboBox _neuralModels = new() { MinWidth = 260 };
+    private readonly Button _pullButton = Ui.GhostButton("Скачать модель");
+    private readonly Button _installOllama = Ui.PrimaryButton("Установить Ollama", yellow: true);
+    private ToggleSwitch? _neuralSwitch;
+    private CancellationTokenSource? _pullCts;
+    private string _neuralSig = "";
+
+    private Control BuildNeuralCard()
+    {
+        var p = new StackPanel { Spacing = 4 };
+        var head = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        head.Children.Add(Ui.Badge("✦", yellow: true));
+        var mid = new StackPanel { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        mid.Children.Add(Ui.Title("Нейро-подсказки · модуль"));
+        mid.Children.Add(Ui.Hint("Продолжение фразы после пробела от локальной языковой модели. Выключено по умолчанию."));
+        Grid.SetColumn(mid, 1); head.Children.Add(mid);
+        _neuralSwitch = Ui.Switch(S.NeuralEnabled);
+        _neuralSwitch.VerticalAlignment = VerticalAlignment.Center;
+        _neuralSwitch.IsCheckedChanged += (_, _) => { if (_loading) return; S.NeuralEnabled = _neuralSwitch.IsChecked == true; _app.SaveSettings(); };
+        Grid.SetColumn(_neuralSwitch, 2); head.Children.Add(_neuralSwitch);
+        p.Children.Add(head);
+
+        _neuralStatus.Margin = new Thickness(0, 10, 0, 4);
+        p.Children.Add(_neuralStatus);
+
+        _neuralModels.SelectionChanged += (_, _) =>
+        {
+            if (_loading || _neuralModels.SelectedIndex < 0) return;
+            S.NeuralModel = ModelNames()[_neuralModels.SelectedIndex];
+            _app.SaveSettings();
+            Refresh();
+        };
+        _pullButton.Margin = new Thickness(8, 0, 0, 0);
+        _pullButton.Click += async (_, _) => await PullModel();
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        row.Children.Add(_neuralModels); row.Children.Add(_pullButton);
+        p.Children.Add(row);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 8, 0, 0) };
+        _installOllama.Click += (_, _) => NeuralService.OpenUrl("https://ollama.com/download");
+        var recheck = Ui.GhostButton("Проверить снова");
+        recheck.Click += async (_, _) => { if (_app.Neural != null) { await _app.Neural.RefreshAsync(); Refresh(); } };
+        buttons.Children.Add(_installOllama); buttons.Children.Add(recheck);
+        p.Children.Add(buttons);
+        p.Children.Add(Ui.Hint("Как включить: 1) установите бесплатную программу Ollama; 2) выберите модель и нажмите «Скачать модель»; 3) включите переключатель. Модель работает на вашем компьютере, текст никуда не отправляется. Маленькие модели хорошо пишут по-русски и по-английски, по-таджикски — заметно слабее."));
+        return Ui.CardBox(p);
+    }
+
+    private List<string> ModelNames()
+    {
+        var names = NeuralService.Recommended.Select(m => m.Name).ToList();
+        foreach (var m in _app.Neural?.InstalledModels ?? new()) if (!names.Contains(m) && !names.Contains(m.Replace(":latest", ""))) names.Add(m);
+        if (!names.Contains(S.NeuralModel)) names.Add(S.NeuralModel);
+        return names;
+    }
+
+    private async Task PullModel()
+    {
+        var n = _app.Neural;
+        if (n == null) return;
+        if (_pullCts != null) { _pullCts.Cancel(); return; }
+        _pullCts = new CancellationTokenSource();
+        ((TextBlock)_pullButton.Content!).Text = "Отменить";
+        var progress = new Progress<(double Fraction, string Status)>(p =>
+            _neuralStatus.Text = p.Fraction > 0 ? $"Скачиваю {S.NeuralModel}: {p.Fraction:P0}" : $"Скачиваю {S.NeuralModel}: {p.Status}");
+        bool ok = await n.PullAsync(S.NeuralModel, progress, _pullCts.Token);
+        _pullCts = null;
+        ((TextBlock)_pullButton.Content!).Text = "Скачать модель";
+        _neuralSig = "";
+        Refresh();
+        if (!ok) _neuralStatus.Text = $"Не удалось скачать: {n.LastError}";
+    }
+
+    private void RefreshNeural()
+    {
+        var n = _app.Neural;
+        _neuralSwitch!.IsChecked = S.NeuralEnabled;
+        if (_pullCts != null) return;   // progress text in use
+        var names = ModelNames();
+        var sig = $"{n?.OllamaFound}|{string.Join(",", n?.InstalledModels ?? new())}|{S.NeuralModel}";
+        if (sig == _neuralSig) return;
+        _neuralSig = sig;
+        _neuralModels.ItemsSource = names.Select(m =>
+        {
+            var rec = NeuralService.Recommended.FirstOrDefault(r => r.Name == m);
+            var mark = n?.ModelInstalled(m) == true ? "✓ " : "";
+            return rec != null ? $"{mark}{m} — {rec.Description}" : $"{mark}{m}";
+        }).ToList();
+        _neuralModels.SelectedIndex = names.IndexOf(S.NeuralModel);
+        bool found = n?.OllamaFound == true;
+        bool installed = n?.ModelInstalled(S.NeuralModel) == true;
+        _installOllama.IsVisible = !found;
+        _pullButton.IsEnabled = found;
+        _pullButton.IsVisible = !installed;
+        _neuralStatus.Text = n?.OllamaFound switch
+        {
+            null => "Проверяю Ollama…",
+            false => "Ollama не найдена на этом компьютере.",
+            true when installed => S.NeuralEnabled ? $"Работает · модель {S.NeuralModel}" : $"Готово к включению · модель {S.NeuralModel} скачана",
+            _ => $"Ollama найдена. Модель {S.NeuralModel} ещё не скачана."
+        };
+        _neuralStatus.Foreground = found && installed ? Ui.Yellow : Ui.Muted;
+    }
+
     // ------------------------------------------------------------------ layouts
     private Control BuildLayoutsCard()
     {
@@ -438,6 +558,7 @@ public sealed class SettingsWindow : Window
                 _appsList.Children.Add(Pill(a, () => { S.ExcludedApps.Remove(a); _app.SaveSettings(); Refresh(); }));
 
             RefreshHotkeys();
+            RefreshNeural();
             if (!_layoutsBuilt && _app.Platform != null) { RefreshLayouts(); _layoutsBuilt = true; }
         }
         finally { _loading = wasLoading; }

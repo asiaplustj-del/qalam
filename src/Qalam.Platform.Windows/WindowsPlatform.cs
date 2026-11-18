@@ -300,6 +300,36 @@ public sealed class WindowsPlatform : IKeyboardPlatform
         catch { return null; }
     }
 
+    public (int X, int Y, int W, int H)? GetCaretRect()
+    {
+        try
+        {
+            var fg = GetForegroundWindow();
+            uint tid = GetWindowThreadProcessId(fg, out _);
+            var gti = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
+            if (GetGUIThreadInfo(tid, ref gti) && gti.hwndCaret != IntPtr.Zero)
+            {
+                var pt = new POINT { X = gti.rcCaret.Left, Y = gti.rcCaret.Top };
+                if (ClientToScreen(gti.hwndCaret, ref pt))
+                {
+                    int h = Math.Max(gti.rcCaret.Bottom - gti.rcCaret.Top, 12);
+                    if (pt.X != 0 || pt.Y != 0) return (pt.X, pt.Y, Math.Max(gti.rcCaret.Right - gti.rcCaret.Left, 1), h);
+                }
+            }
+            // Chrome, Word, Electron apps: ask the accessibility caret object
+            var target = gti.hwndFocus != IntPtr.Zero ? gti.hwndFocus : fg;
+            var iid = IID_IAccessible;
+            if (AccessibleObjectFromWindow(target, OBJID_CARET, ref iid, out var obj) == 0 && obj is IAccessible acc)
+            {
+                acc.accLocation(out int l, out int t, out int w, out int hh, 0);
+                Marshal.ReleaseComObject(acc);
+                if (l != 0 || t != 0) return (l, t, Math.Max(w, 1), Math.Max(hh, 12));
+            }
+        }
+        catch { }
+        return null;
+    }
+
     public void SetStartWithSystem(bool enabled)
     {
         try
