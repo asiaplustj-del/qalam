@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Qalam</AssemblyName>
+    <RootNamespace>Qalam.App</RootNamespace>
+    <Version>0.1.0</Version>
+    <Product>Qalam</Product>
+    <Company>Asia-Plus</Company>
+    <ApplicationIcon>Assets\qalam.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\*.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Qalam.Core\Qalam.Core.csproj" />
+    <ProjectReference Include="..\Qalam.Platform.Windows\Qalam.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Qalam.Platform.Mac\Qalam.Platform.Mac.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,101 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - name: Engine simulation
+        working-directory: tests/Qalam.Sim
+        run: dotnet run -c Release
+
+  windows:
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - name: Version
+        shell: bash
+        run: |
+          V="0.1.${{ github.run_number }}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; fi
+          echo "QALAM_VERSION=$V" >> $GITHUB_ENV
+      - name: Publish
+        run: dotnet publish src/Qalam.App/Qalam.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=${{ env.QALAM_VERSION }} -o out/win-x64
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc packaging/windows/qalam.iss
+          Compress-Archive -Path out/win-x64/* -DestinationPath "out/Qalam-${env:QALAM_VERSION}-windows-portable.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qalam-windows
+          path: |
+            out/Qalam-Setup-*.exe
+            out/*-windows-portable.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/Qalam-Setup-*.exe
+            out/*-windows-portable.zip
+
+  macos:
+    runs-on: macos-14
+    needs: test
+    strategy:
+      matrix:
+        rid: [ osx-arm64, osx-x64 ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - name: Version
+        run: |
+          V="0.1.${{ github.run_number }}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; fi
+          echo "QALAM_VERSION=$V" >> $GITHUB_ENV
+      - name: Publish
+        run: dotnet publish src/Qalam.App/Qalam.App.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:Version=$QALAM_VERSION -o out/${{ matrix.rid }}
+      - name: App bundle + DMG
+        run: |
+          ARCH=$([ "${{ matrix.rid }}" = "osx-arm64" ] && echo "AppleSilicon" || echo "Intel")
+          APP=out/Qalam.app
+          mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
+          cp -R out/${{ matrix.rid }}/* $APP/Contents/MacOS/
+          sed "s/__VERSION__/$QALAM_VERSION/g" packaging/macos/Info.plist > $APP/Contents/Info.plist
+          cp packaging/macos/qalam.icns $APP/Contents/Resources/
+          chmod +x $APP/Contents/MacOS/Qalam
+          codesign --force --deep --sign - $APP
+          mkdir -p out/dmg && cp -R $APP out/dmg/ && ln -s /Applications out/dmg/Applications
+          hdiutil create -volname Qalam -srcfolder out/dmg -ov -format UDZO "out/Qalam-$QALAM_VERSION-macOS-$ARCH.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qalam-${{ matrix.rid }}
+          path: out/*.dmg
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.dmg

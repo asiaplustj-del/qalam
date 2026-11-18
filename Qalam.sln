@@ -1,0 +1,57 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{5C311CA7-8CBE-47FC-8F09-0C309D84D771}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Qalam.App", "src\Qalam.App\Qalam.App.csproj", "{D7CA2A8E-A82D-4771-9A7B-67F24D3FB291}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Qalam.Core", "src\Qalam.Core\Qalam.Core.csproj", "{614A988F-3766-4586-A8BA-914F16A4B9FC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Qalam.Platform.Mac", "src\Qalam.Platform.Mac\Qalam.Platform.Mac.csproj", "{EC934B55-E060-415F-B140-E058B0CFB303}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Qalam.Platform.Windows", "src\Qalam.Platform.Windows\Qalam.Platform.Windows.csproj", "{65EDB056-F18B-4D50-AB3D-FCFFAAF3D820}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{66F35593-B6AE-4F5A-B281-AB31475AA7DF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Qalam.Sim", "tests\Qalam.Sim\Qalam.Sim.csproj", "{CD6D5905-4FC5-4420-8CF6-5DFC53EEBAB8}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D7CA2A8E-A82D-4771-9A7B-67F24D3FB291}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7CA2A8E-A82D-4771-9A7B-67F24D3FB291}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7CA2A8E-A82D-4771-9A7B-67F24D3FB291}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7CA2A8E-A82D-4771-9A7B-67F24D3FB291}.Release|Any CPU.Build.0 = Release|Any CPU
+		{614A988F-3766-4586-A8BA-914F16A4B9FC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{614A988F-3766-4586-A8BA-914F16A4B9FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{614A988F-3766-4586-A8BA-914F16A4B9FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{614A988F-3766-4586-A8BA-914F16A4B9FC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EC934B55-E060-415F-B140-E058B0CFB303}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EC934B55-E060-415F-B140-E058B0CFB303}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EC934B55-E060-415F-B140-E058B0CFB303}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EC934B55-E060-415F-B140-E058B0CFB303}.Release|Any CPU.Build.0 = Release|Any CPU
+		{65EDB056-F18B-4D50-AB3D-FCFFAAF3D820}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{65EDB056-F18B-4D50-AB3D-FCFFAAF3D820}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{65EDB056-F18B-4D50-AB3D-FCFFAAF3D820}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{65EDB056-F18B-4D50-AB3D-FCFFAAF3D820}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CD6D5905-4FC5-4420-8CF6-5DFC53EEBAB8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CD6D5905-4FC5-4420-8CF6-5DFC53EEBAB8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CD6D5905-4FC5-4420-8CF6-5DFC53EEBAB8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CD6D5905-4FC5-4420-8CF6-5DFC53EEBAB8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{D7CA2A8E-A82D-4771-9A7B-67F24D3FB291} = {5C311CA7-8CBE-47FC-8F09-0C309D84D771}
+		{614A988F-3766-4586-A8BA-914F16A4B9FC} = {5C311CA7-8CBE-47FC-8F09-0C309D84D771}
+		{EC934B55-E060-415F-B140-E058B0CFB303} = {5C311CA7-8CBE-47FC-8F09-0C309D84D771}
+		{65EDB056-F18B-4D50-AB3D-FCFFAAF3D820} = {5C311CA7-8CBE-47FC-8F09-0C309D84D771}
+		{CD6D5905-4FC5-4420-8CF6-5DFC53EEBAB8} = {66F35593-B6AE-4F5A-B281-AB31475AA7DF}
+	EndGlobalSection
+EndGlobal
