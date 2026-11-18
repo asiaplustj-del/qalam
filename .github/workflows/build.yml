@@ -53,13 +53,6 @@ jobs:
           path: |
             out/Qalam-Setup-*.exe
             out/*-windows-portable.zip
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            out/Qalam-Setup-*.exe
-            out/*-windows-portable.zip
 
   macos:
     runs-on: macos-latest
@@ -94,8 +87,26 @@ jobs:
         with:
           name: qalam-${{ matrix.rid }}
           path: out/*.dmg
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+
+  release:
+    # publish a GitHub Release when a tag v* is pushed or the commit message contains [release]
+    if: startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    needs: [ windows, macos ]
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - name: Version
+        run: |
+          V="0.1.${{ github.run_number }}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; fi
+          echo "QALAM_VERSION=$V" >> $GITHUB_ENV
+      - uses: softprops/action-gh-release@v2
         with:
-          files: out/*.dmg
+          tag_name: v${{ env.QALAM_VERSION }}
+          name: Qalam ${{ env.QALAM_VERSION }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            **Windows:** `Qalam-Setup-….exe` — установщик (без прав администратора) или portable .zip.
+            **macOS:** `…-macOS-AppleSilicon.dmg` для M1–M4, `…-Intel.dmg` для Intel. Первый запуск: правый клик → «Открыть», затем разрешить «Универсальный доступ» и «Мониторинг ввода».
+          files: dist/*
