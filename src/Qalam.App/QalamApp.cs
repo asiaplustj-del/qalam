@@ -19,6 +19,10 @@ public sealed class QalamApp : Application
     public int CorrectionsCount { get; private set; }
     public NeuralService? Neural { get; private set; }
     private SuggestionPopup? _popup;
+    private GhostText? _ghost;
+    public Updater.Release? AvailableUpdate { get; private set; }
+    private NativeMenuItem? _updateItem;
+    private NativeMenu? _menu;
     public event Action? Changed;
 
     private TrayIcon? _tray;
@@ -51,6 +55,7 @@ public sealed class QalamApp : Application
         {
             bool startHidden = desktop.Args?.Contains("--tray") == true;
             SetupTray();
+            StartUpdateTimer();
             if (!startHidden) ShowSettings();
             _ = InitEngineAsync();
         }
@@ -125,7 +130,8 @@ public sealed class QalamApp : Application
     private void OnSuggestion(QalamController.Suggestion? sug)
     {
         _popup ??= new SuggestionPopup();
-        if (sug == null) { _popup.Hide(); return; }
+        _ghost ??= new GhostText();
+        if (sug == null) { _popup.Hide(); _ghost.Hide(); return; }
         // The caret position is asked from the OTHER app (accessibility API) — it can be slow,
         // so never on the UI thread, and with a hard time limit.
         _ = Task.Run(async () =>
@@ -138,11 +144,69 @@ public sealed class QalamApp : Application
             Dispatcher.UIThread.Post(() =>
             {
                 if (Controller?.CurrentSuggestion != sug) return;
-                if (caret is not { } c) { _popup.Hide(); return; }
+                if (caret is not { } c) { _popup.Hide(); _ghost.Hide(); return; }
                 double scale = OperatingSystem.IsMacOS() ? (_popup.Screens.Primary?.Scaling ?? 1) : 1;  // macOS reports points
-                _popup.ShowSuggestion(sug, new PixelPoint((int)(c.X * scale), (int)(c.Y * scale)), (int)(c.H * scale), Settings.SuggestionAbove);
+                var top = new PixelPoint((int)(c.X * scale), (int)(c.Y * scale));
+                int h = (int)(c.H * scale);
+                if (Settings.InlineSuggestions) { _popup.Hide(); _ghost.ShowAt(sug, sug.Typed, top, h); }
+                else { _ghost.Hide(); _popup.ShowSuggestion(sug, top, h, Settings.SuggestionAbove); }
             });
         });
+    }
+
+    // ------------------------------------------------------------------ updates
+    public event Action? UpdateStateChanged;
+
+    /// <summary>Checks GitHub for a newer Qalam. Quiet: errors only go to the log.</summary>
+    public async Task<Updater.Release?> CheckForUpdatesAsync()
+    {
+        try
+        {
+            var r = await Updater.CheckAsync();
+            Settings.LastUpdateCheck = DateTime.UtcNow;
+            Settings.Save();
+            AvailableUpdate = r != null && Updater.IsNewer(r.Version) ? r : null;
+            Log.Info($"update check: current {Updater.Current}, latest {r?.Version}");
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_updateItem != null && _menu != null)
+                {
+                    bool shown = _menu.Items.Contains(_updateItem);
+                    if (AvailableUpdate != null)
+                    {
+                        _updateItem.Header = $"Доступна версия {AvailableUpdate.Version} — обновить…";
+                        if (!shown) _menu.Items.Insert(0, _updateItem);
+                    }
+                    else if (shown) _menu.Items.Remove(_updateItem);
+                }
+                UpdateStateChanged?.Invoke();
+            });
+            return r;
+        }
+        catch (Exception e) { Log.Error("update check", e); throw; }
+    }
+
+    private void StartUpdateTimer()
+    {
+        var t = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
+        async void Tick()
+        {
+            if (!Settings.AutoCheckUpdates || DateTime.UtcNow - Settings.LastUpdateCheck < TimeSpan.FromHours(20)) return;
+            try { await CheckForUpdatesAsync(); } catch { }
+        }
+        t.Tick += (_, _) => Tick();
+        t.Start();
+        DispatcherTimer.RunOnce(Tick, TimeSpan.FromSeconds(15));
+    }
+
+    /// <summary>Downloads and installs <paramref name="r"/>, then quits so the installer can replace Qalam.</summary>
+    public async Task InstallUpdateAsync(Updater.Release r, IProgress<double> progress, CancellationToken ct)
+    {
+        var file = await Updater.DownloadAsync(r, progress, ct);
+        Log.Info($"update {r.Version} downloaded: {file}");
+        Updater.StartInstall(file);
+        await Task.Delay(800);
+        Quit();
     }
 
     /// <summary>Logs when the UI thread stops responding (and what the app was doing).</summary>
@@ -189,6 +253,9 @@ public sealed class QalamApp : Application
         _autoItem.Click += (_, _) => { if (Controller != null) Controller.AutoMode = !Controller.AutoMode; };
         _pauseItem = new NativeMenuItem("Пауза") { ToggleType = NativeMenuItemToggleType.CheckBox, IsChecked = Settings.Paused };
         _pauseItem.Click += (_, _) => TogglePause();
+        _menu = menu;
+        _updateItem = new NativeMenuItem("Обновление");
+        _updateItem.Click += (_, _) => ShowSettings();
         var settings = new NativeMenuItem("Настройки…");
         settings.Click += (_, _) => ShowSettings();
         var quit = new NativeMenuItem("Выйти");
@@ -260,6 +327,8 @@ public sealed class QalamApp : Application
     {
         Controller?.Dispose();
         Neural?.Dispose();
+        _ghost?.Close();
+        _popup?.Close();
         if (_tray != null) _tray.IsVisible = false;
         (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
     }

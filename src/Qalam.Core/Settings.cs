@@ -62,6 +62,11 @@ public sealed class QalamSettings
     public bool RestoreTajik { get; set; } = true;
     /// <summary>Dictionary word completion, accepted with Tab.</summary>
     public bool WordCompletion { get; set; } = true;
+    /// <summary>Show suggestions as semi-transparent text right in the line (true) or in a separate box (false).</summary>
+    public bool InlineSuggestions { get; set; } = true;
+    /// <summary>Check GitHub for a new version once a day.</summary>
+    public bool AutoCheckUpdates { get; set; } = true;
+    public DateTime LastUpdateCheck { get; set; }
     /// <summary>Show the suggestion above the text line (macOS shows its own predictions below it).</summary>
     public bool SuggestionAbove { get; set; } = OperatingSystem.IsMacOS();
 

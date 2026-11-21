@@ -13,7 +13,7 @@ public sealed class QalamController : IDisposable
     public event Action<Correction>? Corrected;
 
     // ---------- suggestions (word completion + neural phrases) ----------
-    public sealed record Suggestion(string Text, int Erase, string Insert, bool IsPhrase, IReadOnlyList<string> Alternatives, long Version);
+    public sealed record Suggestion(string Text, int Erase, string Insert, bool IsPhrase, IReadOnlyList<string> Alternatives, long Version, string Typed = "");
     /// <summary>Show/hide the suggestion popup (null = hide). Raised on the hook thread.</summary>
     public event Action<Suggestion?>? SuggestionChanged;
     /// <summary>The user finished a word: a neural module may propose a continuation of <c>text</c>.</summary>
@@ -140,7 +140,7 @@ public sealed class QalamController : IDisposable
         var list = Completer.Complete(typed, Engine.CurrentLayout, Engine.ContextLanguage);
         if (list.Count == 0) { ClearSuggestion(); return; }
         SetSuggestion(new Suggestion(list[0].Word, typed.Length, list[0].Word, false,
-            list.Skip(1).Select(c => c.Word).ToList(), _version));
+            list.Skip(1).Select(c => c.Word).ToList(), _version, typed));
     }
 
     /// <summary>Called by the neural module when its answer arrives; ignored if the user kept typing.</summary>

@@ -61,9 +61,10 @@ public sealed class SettingsWindow : Window
         root.Children.Add(BuildExceptionsCard());
         root.Children.Add(BuildAppsCard());
         root.Children.Add(BuildTryCard());
+        root.Children.Add(BuildUpdateCard());
         root.Children.Add(new TextBlock
         {
-            Text = "Qalam 0.1 · студия видеопродакшена «Азия-Плюс» · всё работает на вашем компьютере, без интернета",
+            Text = $"Qalam {Updater.Current} · студия видеопродакшена «Азия-Плюс» · всё работает на вашем компьютере, без интернета",
             FontSize = 11, Foreground = Ui.Dim, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 6, 0, 0)
         });
@@ -288,7 +289,9 @@ public sealed class SettingsWindow : Window
         p.Children.Add(Ui.Caption("Подсказки и таджикские буквы"));
         p.Children.Add(BoolRow("Дописывать слова", "Под курсором появляется подсказка: «точик» → «тоҷикистон». Tab — принять, просто печатайте дальше — игнорировать. Работает по словарю, без интернета и нейросети.",
             S.WordCompletion, v => S.WordCompletion = v));
-        p.Children.Add(BoolRow("Подсказка над строкой", "Иначе — под строкой. На Mac снизу показывает свои подсказки сама система, поэтому по умолчанию — сверху.",
+        p.Children.Add(BoolRow("Подсказка прямо в строке", "Полупрозрачный текст сразу после курсора, как в Cotypist. Выключите — подсказка будет в отдельной плашке.",
+            S.InlineSuggestions, v => S.InlineSuggestions = v));
+        p.Children.Add(BoolRow("Плашка над строкой", "Только для режима с плашкой. На Mac снизу показывает свои подсказки сама система.",
             S.SuggestionAbove, v => S.SuggestionAbove = v));
         p.Children.Add(BoolRow("Восстанавливать таджикские буквы", "«хамчун» → «ҳамчун», «чахон» → «ҷаҳон», «точикистон» → «тоҷикистон». Слова, которые и так правильные («ки», «кор»), не трогаются. Отменить — той же клавишей, что и исправление.",
             S.RestoreTajik, v => S.RestoreTajik = v));
@@ -758,6 +761,81 @@ public sealed class SettingsWindow : Window
             Background = Ui.Field, BorderBrush = Ui.Border, CornerRadius = new CornerRadius(9), Padding = new Thickness(10, 8), FontSize = 14
         });
         return Ui.CardBox(p);
+    }
+
+    // ------------------------------------------------------------------ updates
+    private readonly TextBlock _updateStatus = new() { FontSize = 13, Foreground = Ui.Muted, TextWrapping = TextWrapping.Wrap };
+    private readonly Button _installButton = Ui.PrimaryButton("Обновить", yellow: true);
+    private CancellationTokenSource? _updateCts;
+
+    private Control BuildUpdateCard()
+    {
+        var p = new StackPanel { Spacing = 6 };
+        p.Children.Add(Ui.Caption("Обновления"));
+        p.Children.Add(new TextBlock { Text = $"Установлена версия {Updater.Current}", FontSize = 14, FontWeight = FontWeight.SemiBold, Foreground = Ui.Text });
+        p.Children.Add(_updateStatus);
+        var check = Ui.GhostButton("Проверить обновления");
+        check.Click += async (_, _) =>
+        {
+            _updateStatus.Text = "Проверяю…";
+            try
+            {
+                var r = await _app.CheckForUpdatesAsync();
+                if (r == null) _updateStatus.Text = "Не удалось узнать последнюю версию.";
+            }
+            catch (Exception e) { _updateStatus.Text = "Нет связи с GitHub: " + e.Message; }
+            RefreshUpdate();
+        };
+        _installButton.Click += async (_, _) => await InstallUpdate();
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        row.Children.Add(check); row.Children.Add(_installButton);
+        p.Children.Add(row);
+        p.Children.Add(BoolRow("Проверять автоматически", "Раз в день Qalam смотрит, нет ли новой версии, и показывает пункт в меню значка.",
+            S.AutoCheckUpdates, v => S.AutoCheckUpdates = v));
+        p.Children.Add(Ui.Hint("Новая версия скачивается с GitHub самим Qalam и ставится поверх: настройки, словарь исключений и разрешения macOS сохраняются, окно «Apple не удалось проверить» не появляется."));
+        _app.UpdateStateChanged += () => Dispatcher.UIThread.Post(RefreshUpdate);
+        RefreshUpdate();
+        return Ui.CardBox(p);
+    }
+
+    private void RefreshUpdate()
+    {
+        if (_updateCts != null) return;
+        var r = _app.AvailableUpdate;
+        _installButton.IsVisible = r != null;
+        if (r != null)
+        {
+            ((TextBlock)_installButton.Content!).Text = Updater.CanSelfUpdate ? $"Обновить до {r.Version}" : "Открыть страницу загрузки";
+            _updateStatus.Text = $"Доступна версия {r.Version}." + (r.AssetBytes > 0 ? $" Размер {ModelFiles.Size(r.AssetBytes)}." : "");
+            _updateStatus.Foreground = Ui.Yellow;
+        }
+        else if (S.LastUpdateCheck > DateTime.MinValue)
+        {
+            _updateStatus.Text = $"У вас последняя версия · проверено {S.LastUpdateCheck.ToLocalTime():dd.MM HH:mm}";
+            _updateStatus.Foreground = Ui.Muted;
+        }
+    }
+
+    private async Task InstallUpdate()
+    {
+        var r = _app.AvailableUpdate;
+        if (r == null) return;
+        if (!Updater.CanSelfUpdate || r.AssetUrl == null) { NeuralService.OpenUrl(r.PageUrl); return; }
+        if (_updateCts != null) { _updateCts.Cancel(); return; }
+        _updateCts = new CancellationTokenSource();
+        ((TextBlock)_installButton.Content!).Text = "Отменить";
+        try
+        {
+            await _app.InstallUpdateAsync(r, new Progress<double>(f => _updateStatus.Text = $"Скачиваю {r.Version}… {f:P0}"), _updateCts.Token);
+            _updateStatus.Text = "Устанавливаю — Qalam перезапустится сам.";
+        }
+        catch (OperationCanceledException) { _updateStatus.Text = "Скачивание отменено."; }
+        catch (Exception e) { _updateStatus.Text = "Не удалось обновить: " + e.Message; }
+        finally
+        {
+            _updateCts = null;
+            RefreshUpdate();
+        }
     }
 
     // ------------------------------------------------------------------ state

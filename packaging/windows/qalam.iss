@@ -38,6 +38,8 @@ Name: "{userdesktop}\Qalam"; Filename: "{app}\Qalam.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Qalam.exe"; Description: "Запустить Qalam"; Flags: nowait postinstall skipifsilent
+; silent update from inside Qalam: start the new version right away
+Filename: "{app}\Qalam.exe"; Parameters: "--tray"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM Qalam.exe /F"; Flags: runhidden; RunOnceId: "KillQalam"
