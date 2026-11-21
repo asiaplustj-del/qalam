@@ -353,6 +353,8 @@ public sealed class MacPlatform : IKeyboardPlatform
     private static readonly IntPtr AXFocused = CFStr("AXFocusedUIElement");
     private static readonly IntPtr AXSelRange = CFStr("AXSelectedTextRange");
     private static readonly IntPtr AXBoundsForRange = CFStr("AXBoundsForRange");
+    private static readonly IntPtr AXPositionAttr = CFStr("AXPosition");
+    private static readonly IntPtr AXSizeAttr = CFStr("AXSize");
 
     /// <summary>Caret rectangle in POINTS (macOS global coordinates, top-left origin).</summary>
     public (int X, int Y, int W, int H)? GetCaretRect()
@@ -390,6 +392,33 @@ public sealed class MacPlatform : IKeyboardPlatform
         {
             if (bounds != IntPtr.Zero) CFRelease(bounds);
             if (rangeVal != IntPtr.Zero) CFRelease(rangeVal);
+            if (focused != IntPtr.Zero) CFRelease(focused);
+            if (sys != IntPtr.Zero) CFRelease(sys);
+        }
+    }
+
+    public (int X, int Y, int W, int H)? GetFocusRect()
+    {
+        IntPtr sys = IntPtr.Zero, focused = IntPtr.Zero, pos = IntPtr.Zero, size = IntPtr.Zero;
+        try
+        {
+            int pid = FrontmostPid();
+            if (pid <= 0 || pid == Environment.ProcessId) return null;
+            sys = AXUIElementCreateApplication(pid);
+            AXUIElementSetMessagingTimeout(sys, 0.25f);
+            if (AXUIElementCopyAttributeValue(sys, AXFocused, out focused) != 0 || focused == IntPtr.Zero) return null;
+            AXUIElementSetMessagingTimeout(focused, 0.25f);
+            if (AXUIElementCopyAttributeValue(focused, AXPositionAttr, out pos) != 0 || pos == IntPtr.Zero) return null;
+            if (AXUIElementCopyAttributeValue(focused, AXSizeAttr, out size) != 0 || size == IntPtr.Zero) return null;
+            if (!AXValueGetValue(pos, kAXValueCGPointType, out CGPoint p) || !AXValueGetValue(size, kAXValueCGSizeType, out CGSize z)) return null;
+            if (z.W < 4 || z.H < 4) return null;
+            return ((int)p.X, (int)p.Y, (int)z.W, (int)z.H);
+        }
+        catch { return null; }
+        finally
+        {
+            if (size != IntPtr.Zero) CFRelease(size);
+            if (pos != IntPtr.Zero) CFRelease(pos);
             if (focused != IntPtr.Zero) CFRelease(focused);
             if (sys != IntPtr.Zero) CFRelease(sys);
         }

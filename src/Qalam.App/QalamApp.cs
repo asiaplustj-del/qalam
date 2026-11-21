@@ -127,31 +127,66 @@ public sealed class QalamApp : Application
         UpdateState();
     }
 
+    private DateTime _lastNoCaretLog;
+
     private void OnSuggestion(QalamController.Suggestion? sug)
     {
         _popup ??= new SuggestionPopup();
         _ghost ??= new GhostText();
         if (sug == null) { _popup.Hide(); _ghost.Hide(); return; }
-        // The caret position is asked from the OTHER app (accessibility API) — it can be slow,
-        // so never on the UI thread, and with a hard time limit.
         _ = Task.Run(async () =>
         {
             await Task.Delay(30);   // let the target app move its caret after the keystroke
             if (Controller?.CurrentSuggestion != sug) return;
-            var query = Task.Run(() => { Log.Mark("caret query"); var r = Platform?.GetCaretRect(); Log.Mark("idle"); return r; });
+
+            // 1) our own window (the "Проверить" field): measured by Avalonia itself
+            var own = await Dispatcher.UIThread.InvokeAsync(() => _window?.OwnCaret());
+            if (own is { } o)
+            {
+                Dispatcher.UIThread.Post(() => { if (Controller?.CurrentSuggestion == sug) Show(sug, o.Top, o.Height, exact: true); });
+                return;
+            }
+
+            // 2) another app: ask its accessibility API — slow apps must not stall us, so with a hard time limit
+            var query = Task.Run(() =>
+            {
+                Log.Mark("caret query");
+                var c = Platform?.GetCaretRect();
+                bool exact = c != null;
+                if (c == null)
+                {
+                    // 3) caret unknown (Telegram, some Electron apps): a small single-line field still gives
+                    //    a useful place — just under its left edge, shown as the box
+                    var f = Platform?.GetFocusRect();
+                    if (f is { } fr && fr.H <= 90) c = (fr.X + 6, fr.Y + 4, 1, fr.H - 8);
+                }
+                Log.Mark("idle");
+                return (c, exact);
+            });
             var done = await Task.WhenAny(query, Task.Delay(400));
-            var caret = done == query ? query.Result : null;
+            var (caret, isExact) = done == query ? query.Result : (null, false);
+            if (caret == null || !isExact)
+            {
+                if (DateTime.UtcNow - _lastNoCaretLog > TimeSpan.FromSeconds(30))
+                {
+                    _lastNoCaretLog = DateTime.UtcNow;
+                    Log.Info($"suggestion '{sug.Text}': caret {(caret == null ? (done == query ? "unknown" : "timeout") : "≈ field")} in {Platform?.ForegroundApp()}");
+                }
+            }
             Dispatcher.UIThread.Post(() =>
             {
                 if (Controller?.CurrentSuggestion != sug) return;
                 if (caret is not { } c) { _popup.Hide(); _ghost.Hide(); return; }
                 double scale = OperatingSystem.IsMacOS() ? (_popup.Screens.Primary?.Scaling ?? 1) : 1;  // macOS reports points
-                var top = new PixelPoint((int)(c.X * scale), (int)(c.Y * scale));
-                int h = (int)(c.H * scale);
-                if (Settings.InlineSuggestions) { _popup.Hide(); _ghost.ShowAt(sug, sug.Typed, top, h); }
-                else { _ghost.Hide(); _popup.ShowSuggestion(sug, top, h, Settings.SuggestionAbove); }
+                Show(sug, new PixelPoint((int)(c.X * scale), (int)(c.Y * scale)), (int)(c.H * scale), isExact);
             });
         });
+    }
+
+    private void Show(QalamController.Suggestion sug, PixelPoint top, int h, bool exact)
+    {
+        if (Settings.InlineSuggestions && exact) { _popup!.Hide(); _ghost!.ShowAt(sug, sug.Typed, top, h); }
+        else { _ghost!.Hide(); _popup!.ShowSuggestion(sug, top, h, exact && Settings.SuggestionAbove); }
     }
 
     // ------------------------------------------------------------------ updates

@@ -47,6 +47,8 @@ public interface IKeyboardPlatform : IDisposable
     string? ForegroundApp();
     /// <summary>Text caret rectangle on screen in physical pixels (top-left origin), or null if unknown.</summary>
     (int X, int Y, int W, int H)? GetCaretRect();
+    /// <summary>Frame of the focused text field (when the exact caret is unknown), physical pixels; null if unknown.</summary>
+    (int X, int Y, int W, int H)? GetFocusRect() => null;
     void SetStartWithSystem(bool enabled);
     /// <summary>True when a laptop runs on battery (no charger).</summary>
     bool IsOnBattery();

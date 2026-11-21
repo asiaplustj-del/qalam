@@ -1,10 +1,12 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Qalam.Core;
 
 namespace Qalam.App;
@@ -747,6 +749,27 @@ public sealed class SettingsWindow : Window
         x.Click += (_, _) => remove();
         Grid.SetColumn(x, 1); g.Children.Add(x);
         return new Border { Background = Ui.Field, BorderBrush = Ui.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 4), Child = g };
+    }
+
+    /// <summary>
+    /// Caret of a text box in THIS window (the "Проверить" field and others). The accessibility API is
+    /// never asked about our own process (it would wait for our own UI thread), so we measure it ourselves.
+    /// UI thread only. Physical pixels.
+    /// </summary>
+    public (PixelPoint Top, int Height)? OwnCaret()
+    {
+        try
+        {
+            if (!IsVisible || !IsActive) return null;
+            if (FocusManager?.GetFocusedElement() is not TextBox tb) return null;
+            var presenter = tb.GetVisualDescendants().OfType<TextPresenter>().FirstOrDefault();
+            if (presenter == null) return null;
+            var r = presenter.TextLayout.HitTestTextPosition(Math.Clamp(tb.CaretIndex, 0, tb.Text?.Length ?? 0));
+            var top = presenter.PointToScreen(r.TopLeft);
+            var bottom = presenter.PointToScreen(r.BottomLeft);
+            return (top, Math.Max(bottom.Y - top.Y, 8));
+        }
+        catch { return null; }
     }
 
     // ------------------------------------------------------------------ try it

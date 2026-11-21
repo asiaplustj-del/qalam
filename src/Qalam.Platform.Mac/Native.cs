@@ -72,9 +72,13 @@ internal static class Native
     [DllImport(AS)] public static extern int AXUIElementCopyParameterizedAttributeValue(IntPtr element, IntPtr attribute, IntPtr parameter, out IntPtr value);
     [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CGRect rect);
     [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CFRange range);
+    [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CGPoint point);
+    [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CGSize size);
     [DllImport(AS)] public static extern IntPtr AXValueCreate(int type, ref CFRange range);
-    public const int kAXValueCGRectType = 3, kAXValueCFRangeType = 4;
+    public const int kAXValueCGPointType = 1, kAXValueCGSizeType = 2, kAXValueCGRectType = 3, kAXValueCFRangeType = 4;
     [StructLayout(LayoutKind.Sequential)] public struct CGRect { public double X, Y, W, H; }
+    [StructLayout(LayoutKind.Sequential)] public struct CGPoint { public double X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct CGSize { public double W, H; }
     [DllImport(CF)] public static extern IntPtr CFStringCreateWithCString(IntPtr alloc, string s, uint encoding);
     public static IntPtr CFStr(string s) => CFStringCreateWithCString(IntPtr.Zero, s, 0x08000100);
 
