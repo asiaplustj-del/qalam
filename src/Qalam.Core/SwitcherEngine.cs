@@ -42,6 +42,26 @@ public sealed class SwitcherEngine
     public bool LearnFromUndo { get; set; } = true;
     /// <summary>"хамчун" → "ҳамчун" when the word only exists with Tajik letters.</summary>
     public bool RestoreTajik { get; set; } = true;
+    /// <summary>Typo correction ("превет" → "привет"); null = not available.</summary>
+    public SpellFixer? Speller { get; set; }
+    public bool FixTypos { get; set; } = true;
+    /// <summary>Learned word pairs (for context-aware completion).</summary>
+    public UserPhrases? Phrases { get; set; }
+    public bool LearnPhrases { get; set; } = true;
+    /// <summary>The last finished word (lowercase), or null at the start of a sentence / field.</summary>
+    public string? PreviousWord => _prevCore;
+    private string? _prevCore;
+
+    /// <summary>Is the next word the first one of a sentence (capital letter expected)?</summary>
+    public bool AtSentenceStart
+    {
+        get
+        {
+            int i = _committed.Length - 1;
+            while (i >= 0 && _committed[i] is ' ' or '\t') i--;
+            return i < 0 || _committed[i] is '.' or '!' or '?' or '…' or '\n';
+        }
+    }
 
     private readonly System.Text.StringBuilder _committed = new();   // finished text of the current field
     /// <summary>What the user has typed in the current text field (best effort, max ~2000 chars).</summary>
@@ -73,6 +93,7 @@ public sealed class SwitcherEngine
         _undoAvailable = false;
         _manualActive = false;
         if (_word.Count > 0) { _word.RemoveAt(_word.Count - 1); return; }
+        _prevCore = null;   // editing what was already written: the word-pair chain is broken
         if (_committed.Length > 0) _committed.Length--;
         if (_boundaryLeft > 0)
         {
@@ -131,6 +152,16 @@ public sealed class SwitcherEngine
                 _contextLang = "tg";
                 Corrected?.Invoke(result);
             }
+            else if (FixTypos && Speller != null
+                     && Speller.Fix(CurrentLayout.Render(_word), CurrentLayout, _contextLang, AtSentenceStart) is { } typoFixed)
+            {
+                var from = CurrentLayout.Render(_word);
+                result = new Correction(from.Length, typoFixed + boundary, null, CorrectionKind.Auto, from, typoFixed);
+                _lastAuto = result; _lastAutoBoundary = boundary; _lastAutoOrigLayout = CurrentLayout;
+                _undoAvailable = true;
+                converted = true;
+                Corrected?.Invoke(result);
+            }
             else
             {
                 _undoAvailable = false;
@@ -157,9 +188,11 @@ public sealed class SwitcherEngine
             _lastLayout = CurrentLayout;
             _lastConverted = converted;
         }
+        string finalWord = result != null ? result.Insert[..^boundary.Length] : CurrentLayout.Render(_word);
         if (result != null) { Trim(result.From.Length - _wordRenderLen);   // retro: previous word is already committed
  _committed.Append(result.Insert); }
         else _committed.Append(CurrentLayout.Render(_word)).Append(boundary);
+        if (_word.Count > 0) NoteWords(finalWord, boundary == "\n");
         if (_committed.Length > 2000) _committed.Remove(0, _committed.Length - 1500);
         _lastBoundary = boundary;
         _boundaryLeft = boundary.Length;
@@ -168,12 +201,36 @@ public sealed class SwitcherEngine
     }
 
     private int _wordRenderLen;
+
+    /// <summary>Remembers word pairs the user writes ("дорогие друзья") — only ordinary dictionary words.</summary>
+    private void NoteWords(string text, bool lineBreak)
+    {
+        foreach (var token in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var core = Detector.Core(token).ToLowerInvariant();
+            bool word = core.Length >= 2 && core.Length == Detector.Core(token).Length && IsDictionaryWord(core)
+                        && !token.Any(char.IsDigit);
+            if (word && _prevCore != null && LearnPhrases && Phrases != null) Phrases.Learn(_prevCore, core);
+            _prevCore = word ? core : null;
+            // a sentence ends — the next word does not continue this one
+            if (_prevCore != null && token.Length > 0 && token[^1] is '.' or '!' or '?' or '…' or ';' or ':') _prevCore = null;
+        }
+        if (lineBreak) _prevCore = null;
+    }
+
+    private bool IsDictionaryWord(string lower)
+    {
+        foreach (var lang in new[] { "ru", "tg", "en" })
+            if (_detector.Model(lang)?.Exact(lower) is { } z && z >= 1.5f) return true;
+        return false;
+    }
     private void Trim(int n) { if (n > 0) _committed.Length = Math.Max(0, _committed.Length - n); }
 
     /// <summary>A completion was accepted: the current word was replaced by <paramref name="text"/>.</summary>
     public void AcceptCompletion(string text)
     {
         _committed.Append(text);
+        NoteWords(text, false);
         _word.Clear(); _lastWord = new(); _boundaryLeft = 0;
         _undoAvailable = false; _manualActive = false;
     }
@@ -293,6 +350,7 @@ public sealed class SwitcherEngine
     public void Reset()
     {
         _word.Clear(); _lastWord = new(); _boundaryLeft = 0; _contextLang = null; _lastConverted = false; _committed.Clear();
+        _prevCore = null;
         _undoAvailable = false; _manualActive = false;
     }
 }

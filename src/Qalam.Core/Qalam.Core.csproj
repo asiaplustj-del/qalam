@@ -7,6 +7,6 @@
     <RootNamespace>Qalam.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Data\*.txt.gz" />
+    <EmbeddedResource Include="Data\*.gz" />
   </ItemGroup>
 </Project>

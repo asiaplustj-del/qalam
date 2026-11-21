@@ -46,7 +46,8 @@ public sealed class QalamController : IDisposable
     public QalamController(IKeyboardPlatform platform, SwitcherEngine engine, QalamSettings settings)
     {
         _platform = platform; Engine = engine; Settings = settings;
-        Completer = new Completer(engine.Detector);
+        Completer = new Completer(engine.Detector) { Phrases = engine.Phrases };
+        engine.Speller ??= new SpellFixer(engine.Detector);
         ApplySettings();
         platform.KeyHandler = OnKey;
         platform.MouseClicked += () => { lock (_sync) { Engine.Reset(); ClearSuggestion(); } };
@@ -59,6 +60,8 @@ public sealed class QalamController : IDisposable
         Engine.LearnFromUndo = Settings.LearnFromUndo;
         Engine.RestoreTajik = Settings.RestoreTajik;
         Completer.UseTajikLetters = Settings.RestoreTajik;
+        Engine.FixTypos = Settings.FixTypos;
+        Engine.LearnPhrases = Settings.LearnPhrases;
         var o = Engine.Detector.Options;
         o.NgramMargin = Settings.Sensitivity switch { 1 => 2.8, 3 => 1.7, _ => 2.2 };
         o.FixSingleLetters = Settings.FixSingleLetters;
@@ -107,6 +110,7 @@ public sealed class QalamController : IDisposable
         {
             _platform.Replace(sug.Erase, sug.Insert);
             Engine.AcceptCompletion(sug.Insert);
+            _modelWord = null;
             _swallowUp = "Tab";
             _version++;
             ClearSuggestion();
@@ -129,38 +133,92 @@ public sealed class QalamController : IDisposable
         switch (k.Special)
         {
             case SpecialKey.None when !(k.Ctrl || k.Alt || k.Meta):
+                UpdateWordSuggestion();
+                // a pause in the middle of a word → the model may finish it in context ("дорогие дру" → "друзья")
+                if (Settings.NeuralEnabled && !_excludedCache && Engine.WordInProgress && Engine.CurrentWordText.Length >= 2)
+                    PhraseOpportunity?.Invoke(_version, Engine.FieldText);
+                break;
             case SpecialKey.Backspace:
                 UpdateWordSuggestion();
                 break;
             case SpecialKey.Space:
-                ClearSuggestion();
+                _modelWord = null;
+                ShowLearnedNextWord();
                 if (Settings.NeuralEnabled && !_excludedCache) PhraseOpportunity?.Invoke(_version, Engine.FieldText);
                 break;
             default:
+                _modelWord = null;
                 ClearSuggestion();
                 break;
         }
         return swallowed;
     }
 
+    // the model's word for the current position: kept while the user types letters that agree with it
+    private (string Context, string Text)? _modelWord;
+
     private void UpdateWordSuggestion()
     {
         if (!Settings.WordCompletion || _excludedCache || !Engine.WordInProgress) { ClearSuggestion(); return; }
         var typed = Engine.CurrentWordText;
-        var list = Completer.Complete(typed, Engine.CurrentLayout, Engine.ContextLanguage);
-        if (list.Count == 0) { ClearSuggestion(); return; }
-        SetSuggestion(new Suggestion(list[0].Word, typed.Length, list[0].Word, false,
-            list.Skip(1).Select(c => c.Word).ToList(), _version, typed));
+        var list = Completer.Complete(typed, Engine.CurrentLayout, Engine.ContextLanguage, 4, Engine.PreviousWord);
+        var words = list.Select(c => c.Word).ToList();
+        // the model's guess still fits what is typed → keep it first
+        var before = Engine.FieldText[..^typed.Length];
+        if (_modelWord is { } m && m.Context == before && m.Text.Length > typed.Length
+            && Completer.SamePrefix(m.Text, typed.ToLowerInvariant()))
+        {
+            var text = m.Text.StartsWith(typed, StringComparison.OrdinalIgnoreCase) ? typed + m.Text[typed.Length..] : m.Text;
+            words.RemoveAll(w => text.StartsWith(w + " ", StringComparison.OrdinalIgnoreCase) || text.Equals(w, StringComparison.OrdinalIgnoreCase));
+            SetSuggestion(new Suggestion(text, typed.Length, text, false, words.Take(3).ToList(), _version, typed));
+            return;
+        }
+        if (words.Count == 0) { ClearSuggestion(); return; }
+        SetSuggestion(new Suggestion(words[0], typed.Length, words[0], false, words.Skip(1).ToList(), _version, typed));
     }
 
-    /// <summary>Called by the neural module when its answer arrives; ignored if the user kept typing.</summary>
+    /// <summary>After a space: the word this user usually writes next ("дорогие " → "друзья").</summary>
+    private void ShowLearnedNextWord()
+    {
+        ClearSuggestion();
+        if (!Settings.WordCompletion || _excludedCache || Engine.PreviousWord is not { } prev || Engine.Phrases == null) return;
+        var next = Engine.Phrases.After(prev, 4).Where(x => x.Count >= 2).Select(x => x.Word).ToList();
+        if (next.Count == 0) return;
+        SetSuggestion(new Suggestion(next[0], 0, next[0], true, next.Skip(1).ToList(), _version));
+    }
+
+    /// <summary>
+    /// Called by the neural module when its answer arrives; ignored if the user kept typing.
+    /// <paramref name="text"/> is the model's raw continuation of the field text.
+    /// </summary>
     public void OfferPhrase(long version, string text)
     {
         lock (_sync)
         {
-            if (version != _version || Engine.WordInProgress || Settings.Paused || string.IsNullOrWhiteSpace(text)) return;
-            SetSuggestion(new Suggestion(text, 0, text, true, Array.Empty<string>(), version));
+            if (version != _version || Settings.Paused || string.IsNullOrWhiteSpace(text)) return;
+            if (!Engine.WordInProgress)
+            {
+                var phrase = PhraseText.Clean(text, Engine.FieldText);
+                if (phrase == null) return;
+                var alts = CurrentSuggestion is { IsPhrase: true } learned && !phrase.StartsWith(learned.Text + " ", StringComparison.OrdinalIgnoreCase)
+                    ? new List<string> { learned.Text } : new List<string>();
+                SetSuggestion(new Suggestion(phrase, 0, phrase, true, alts, version));
+                return;
+            }
+            var typed = Engine.CurrentWordText;
+            var before = Engine.FieldText[..^typed.Length];
+            var full = PhraseText.CompleteWord(text, typed, before, IsWord);
+            if (full == null) return;
+            _modelWord = (before, full);
+            UpdateWordSuggestion();
         }
+    }
+
+    private bool IsWord(string lower)
+    {
+        foreach (var lang in new[] { "ru", "tg", "en" })
+            if (Engine.Detector.Model(lang)?.Frequency(lower) != null) return true;
+        return Engine.Speller?.IsRealWord(lower) == true;
     }
 
     private void SetSuggestion(Suggestion s)

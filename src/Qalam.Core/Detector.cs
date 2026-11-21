@@ -149,6 +149,8 @@ public sealed class Detector
         var lower = core.ToLowerInvariant();
         if (!TajikLetters.HasCandidates(lower) || lower.Any(c => c is >= 'a' and <= 'z')) return null;
         if (User.IsKnown(core)) return null;
+        // names inside Russian text keep their Russian spelling ("Фируз пришёл", not "Фирӯз")
+        if (char.IsUpper(core[0]) && contextLanguage == "ru") return null;
         // "ки", "чой" are already Tajik; but the dictionary also has rare look-alike spellings
         // ("хамчун" from old texts) — those lose to a much more common Tajik spelling
         var own = tg.Exact(lower) ?? tg.Frequency(lower);
@@ -200,7 +202,7 @@ public sealed class Detector
         return text[a..b];
     }
 
-    private static bool LooksTechnical(string t)
+    internal static bool LooksTechnical(string t)
     {
         bool hasDigit = false, hasLetter = false;
         foreach (var c in t)

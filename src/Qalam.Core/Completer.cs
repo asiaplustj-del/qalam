@@ -12,7 +12,11 @@ public sealed class Completer
 
     public Completer(Detector detector) => _detector = detector;
 
-    public List<Completion> Complete(string typed, KeyboardLayout layout, string? contextLanguage, int k = 3)
+    /// <summary>Learned word pairs of this user (context: what usually follows the previous word).</summary>
+    public UserPhrases? Phrases { get; set; }
+
+    /// <param name="previous">The word before (lowercase) — what the user usually writes after it ranks first.</param>
+    public List<Completion> Complete(string typed, KeyboardLayout layout, string? contextLanguage, int k = 4, string? previous = null)
     {
         var result = new List<Completion>();
         if (typed.Length < MinPrefix || Detector.Core(typed) != typed || typed.Any(c => !char.IsLetter(c) && c != '-')) return result;
@@ -32,17 +36,45 @@ public sealed class Completer
             foreach (var p in prefixes)
                 foreach (var (w, z) in m.WithPrefix(p, 8000))
                 {
-                    if (z < MinZipf || w.Length < lower.Length + 2) continue;
-                    double score = z + (lang == contextLanguage ? 0.7 : 0) + (lang == layout.Language ? 0.3 : 0) - (p != lower ? 0.3 : 0);
+                    if (z < MinZipf || w.Length <= lower.Length) continue;
+                    double score = z + (lang == contextLanguage ? 0.7 : 0) + (lang == layout.Language ? 0.3 : 0) - (p != lower ? 0.3 : 0)
+                                   + PairBonus(previous, w);
                     if (!cands.TryGetValue(w, out var old) || old.Score < score) cands[w] = (score, z, lang);
                 }
         }
-        foreach (var (w, c) in cands.OrderByDescending(kv => kv.Value.Score).Take(k))
-        {
-            // the user probably means the short word itself ("как", not "какой")
-            if (result.Count == 0 && prefixZ >= c.Score - 0.3) break;
+        // the user's own phrases: "дорогие" → "друзья" even if the dictionary prefers "другие"
+        if (previous != null && Phrases != null)
+            foreach (var (w, n) in Phrases.After(previous, 30))
+            {
+                if (w.Length <= lower.Length || !SamePrefix(w, lower) || cands.ContainsKey(w)) continue;
+                cands[w] = (MinZipf + PairBonus(previous, w), MinZipf, contextLanguage ?? layout.Language);
+            }
+        var ranked = cands.OrderByDescending(kv => kv.Value.Score).Take(k).ToList();
+        // a short complete word ("как", "это") is what the user means — no "какой" hint over it
+        if (ranked.Count > 0 && prefixZ > double.MinValue && lower.Length <= 4 && prefixZ >= ranked[0].Value.Score - 0.3
+            && PairBonus(previous, ranked[0].Key) == 0)
+            return result;
+        foreach (var (w, c) in ranked)
             result.Add(new Completion(typed, TajikLetters.MatchCase(typed, w), c.Lang));
-        }
         return result;
+    }
+
+    private double PairBonus(string? previous, string word)
+    {
+        if (previous == null || Phrases == null) return 0;
+        int n = Phrases.Count(previous, word);
+        return n == 0 ? 0 : 2.0 + 1.2 * Math.Log(n);
+    }
+
+    /// <summary>Prefix match that treats Tajik letters as their Russian look-alikes (ҳ = х, ҷ = ч…).</summary>
+    public static bool SamePrefix(string word, string typedLower) =>
+        Fold(word).StartsWith(Fold(typedLower), StringComparison.Ordinal);
+
+    public static string Fold(string s)
+    {
+        var a = s.ToLowerInvariant().ToCharArray();
+        for (int i = 0; i < a.Length; i++)
+            a[i] = a[i] switch { 'ҳ' => 'х', 'ҷ' => 'ч', 'қ' => 'к', 'ғ' => 'г', 'ӯ' => 'у', 'ӣ' => 'и', 'ё' => 'е', _ => a[i] };
+        return new string(a);
     }
 }

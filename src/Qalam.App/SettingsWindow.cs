@@ -284,13 +284,25 @@ public sealed class SettingsWindow : Window
         return Ui.Row(label, hint, sw);
     }
 
+    private readonly ToggleSwitch _typoSwitch = Ui.Switch(true);
+
     // ------------------------------------------------------------------ suggestions
     private Control BuildSuggestCard()
     {
         var p = new StackPanel();
-        p.Children.Add(Ui.Caption("Подсказки и таджикские буквы"));
-        p.Children.Add(BoolRow("Дописывать слова", "Под курсором появляется подсказка: «точик» → «тоҷикистон». Tab — принять, просто печатайте дальше — игнорировать. Работает по словарю, без интернета и нейросети.",
+        p.Children.Add(Ui.Caption("Подсказки, опечатки и таджикские буквы"));
+        _typoSwitch.IsChecked = S.FixTypos;
+        _typoSwitch.IsCheckedChanged += (_, _) => { if (_loading) return; S.FixTypos = _typoSwitch.IsChecked == true; _app.SaveSettings(); };
+        p.Children.Add(Ui.Row("Исправлять опечатки", "Русский, таджикский и английский: «превет» → «привет», «приевт» → «привет», «teh» → «the». Только явные опечатки в одну букву; имена и незнакомые слова не трогаются. Отменить — той же клавишей, что и ручное переключение, и слово запомнится. Также включается в меню значка.", _typoSwitch));
+        p.Children.Add(BoolRow("Дописывать слова", "После курсора бледно появляется окончание: «дороги» → «дорогие», «точик» → «тоҷикистон». Tab — принять, Shift+Tab — другой вариант, просто печатайте дальше — игнорировать. Работает по словарю, без интернета.",
             S.WordCompletion, v => S.WordCompletion = v));
+        var forget = Ui.GhostButton("Забыть выученное");
+        forget.Click += (_, _) => { _app.Phrases?.Clear(); ((TextBlock)forget.Content!).Text = "Забыто"; };
+        var learnRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        var learnSw = Ui.Switch(S.LearnPhrases);
+        learnSw.IsCheckedChanged += (_, _) => { if (_loading) return; S.LearnPhrases = learnSw.IsChecked == true; _app.SaveSettings(); };
+        learnRow.Children.Add(forget); learnRow.Children.Add(learnSw);
+        p.Children.Add(Ui.Row("Учиться на моих фразах", "Qalam запоминает, какое слово вы обычно пишете после какого («дорогие» → «друзья»), и ставит его первым — в том числе сразу после пробела. Хранится только на этом компьютере и только обычные словарные слова — без паролей, чисел и имён.", learnRow));
         p.Children.Add(BoolRow("Подсказка прямо в строке", "Полупрозрачный текст сразу после курсора, как в Cotypist. Выключите — подсказка будет в отдельной плашке.",
             S.InlineSuggestions, v => S.InlineSuggestions = v));
         p.Children.Add(BoolRow("Плашка над строкой", "Только для режима с плашкой. На Mac снизу показывает свои подсказки сама система.",
@@ -881,6 +893,7 @@ public sealed class SettingsWindow : Window
             bool perms = _app.Platform?.HasPermissions() ?? true;
             _permissionCard.IsVisible = !perms;
             _autoSwitch.IsChecked = S.AutoMode;
+            _typoSwitch.IsChecked = S.FixTypos;
 
             if (ctl == null) { _statusTitle.Text = "Загружаю словари…"; _statusHint.Text = "Секунду"; }
             else if (!perms) { _statusTitle.Text = "Ждёт разрешения"; _statusHint.Text = "Без доступа к клавиатуре Qalam не видит нажатия"; }

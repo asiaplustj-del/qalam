@@ -103,12 +103,18 @@ public sealed class NeuralService : IDisposable
         catch (Exception e) { LastError = e.Message; return false; }
     }
 
-    /// <summary>Called after each space: waits a little, then asks the model for a short continuation.</summary>
+    private DateTime _lastSkipLog;
+    private int _asked, _answered, _empty;
+
+    /// <summary>
+    /// Called after each space and on pauses inside a word: waits a little (typing on cancels it),
+    /// then asks the model to continue the text. The controller decides what to show.
+    /// </summary>
     public void OnPhraseOpportunity(QalamController controller, long version, string fieldText)
     {
         if (!_s.NeuralEnabled) return;
-        if (UseBuiltin && !ModelFiles.IsUsable(_s.NeuralModelPath)) return;
-        if (_s.NeuralSkipOnBattery && _platform?.IsOnBattery() == true) return;
+        if (UseBuiltin && !ModelFiles.IsUsable(_s.NeuralModelPath)) { LogSkip("no model file chosen"); return; }
+        if (_s.NeuralSkipOnBattery && _platform?.IsOnBattery() == true) { LogSkip("on battery"); return; }
         _cts?.Cancel();
         var cts = _cts = new CancellationTokenSource();
         var context = fieldText.Length > 800 ? fieldText[^800..] : fieldText;
@@ -118,20 +124,33 @@ public sealed class NeuralService : IDisposable
             try
             {
                 await Task.Delay(_s.NeuralDelayMs, cts.Token);
-                var text = await CompleteAsync(context, cts.Token);
-                if (text != null && !cts.IsCancellationRequested) controller.OfferPhrase(version, text);
+                if (UseBuiltin && Engine.State != LlamaEngine.EngineState.Ready) LogSkip($"engine {Engine.State} — loading the model, suggestions start when it is ready");
+                var raw = await CompleteRawAsync(context, cts.Token);
+                if (cts.IsCancellationRequested) return;
+                _asked++;
+                if (string.IsNullOrWhiteSpace(raw)) _empty++; else _answered++;
+                if (_asked % 20 == 1) Log.Info($"neural: {_asked} requests, {_answered} answers, {_empty} empty (engine {Engine.State})");
+                if (raw != null) controller.OfferPhrase(version, raw);
             }
             catch { }
         });
     }
 
-    public async Task<string?> CompleteAsync(string context, CancellationToken ct)
+    private void LogSkip(string why)
+    {
+        if ((DateTime.UtcNow - _lastSkipLog).TotalSeconds < 60) return;
+        _lastSkipLog = DateTime.UtcNow;
+        Log.Info("neural: skipped — " + why);
+    }
+
+    /// <summary>For the "check" button: a cleaned continuation of <paramref name="context"/>.</summary>
+    public async Task<string?> CompleteAsync(string context, CancellationToken ct) =>
+        PhraseText.Clean(await CompleteRawAsync(context, ct), context);
+
+    public async Task<string?> CompleteRawAsync(string context, CancellationToken ct)
     {
         if (UseBuiltin)
-        {
-            var raw = await Engine.CompleteAsync(_s.NeuralModelPath!, context, 16, ct);
-            return PhraseText.Clean(raw, context);
-        }
+            return await Engine.CompleteAsync(_s.NeuralModelPath!, context, 16, ct);
         var body = new
         {
             model = _s.NeuralModel,
@@ -141,11 +160,10 @@ public sealed class NeuralService : IDisposable
             keep_alive = "30m",
             options = new { num_predict = 14, temperature = 0.2, top_p = 0.9, stop = new[] { "\n" } }
         };
-        var sw = Stopwatch.StartNew();
         using var resp = await _http.PostAsJsonAsync(Url("/api/generate"), body, ct);
         if (!resp.IsSuccessStatusCode) { LastError = $"HTTP {(int)resp.StatusCode}"; return null; }
         var o = await resp.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
-        return PhraseText.Clean(o?["response"]?.GetValue<string>(), context);
+        return o?["response"]?.GetValue<string>();
     }
 
     /// <summary>Keeps the first few words / up to the end of the sentence.</summary>

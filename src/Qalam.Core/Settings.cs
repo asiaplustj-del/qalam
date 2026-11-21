@@ -62,6 +62,10 @@ public sealed class QalamSettings
     public bool RestoreTajik { get; set; } = true;
     /// <summary>Dictionary word completion, accepted with Tab.</summary>
     public bool WordCompletion { get; set; } = true;
+    /// <summary>Fix typos automatically ("превет" → "привет").</summary>
+    public bool FixTypos { get; set; } = true;
+    /// <summary>Remember which word usually follows which (local only) to rank suggestions.</summary>
+    public bool LearnPhrases { get; set; } = true;
     /// <summary>Show suggestions as semi-transparent text right in the line (true) or in a separate box (false).</summary>
     public bool InlineSuggestions { get; set; } = true;
     /// <summary>Check GitHub for a new version once a day.</summary>

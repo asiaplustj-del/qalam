@@ -1,0 +1,19 @@
+Word lists and dictionaries used by Qalam
+=========================================
+
+en.txt.gz, ru.txt.gz, known_en.txt.gz, known_ru.txt.gz
+  Word frequencies from wordfreq by Robyn Speer (https://github.com/rspeer/wordfreq),
+  data licensed CC BY-SA 4.0.
+
+tg.txt.gz
+  Tajik word forms collected from Tajik dictionaries and texts for this project.
+
+hun_ru.aff.gz, hun_ru.dic.gz
+  Russian Hunspell dictionary ru_RU, Copyright (c) 1997-2008 Alexander I. Lebedev,
+  BSD-style license (LibreOffice dictionaries, https://github.com/LibreOffice/dictionaries).
+  Used unmodified (gzip-compressed).
+
+hun_en.aff.gz, hun_en.dic.gz
+  English Hunspell dictionary en_US derived from SCOWL (http://wordlist.aspell.net),
+  Copyright Kevin Atkinson and others; permissive SCOWL license
+  (LibreOffice dictionaries, https://github.com/LibreOffice/dictionaries). Used unmodified.

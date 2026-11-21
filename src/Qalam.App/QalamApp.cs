@@ -18,6 +18,7 @@ public sealed class QalamApp : Application
     public QalamSettings Settings { get; private set; } = QalamSettings.Load();
     public int CorrectionsCount { get; private set; }
     public NeuralService? Neural { get; private set; }
+    public UserPhrases? Phrases { get; private set; }
     private SuggestionPopup? _popup;
     private GhostText? _ghost;
     public Updater.Release? AvailableUpdate { get; private set; }
@@ -26,7 +27,7 @@ public sealed class QalamApp : Application
     public event Action? Changed;
 
     private TrayIcon? _tray;
-    private NativeMenuItem? _autoItem, _pauseItem;
+    private NativeMenuItem? _autoItem, _pauseItem, _typoItem;
     private WindowIcon? _icoNormal, _icoPaused, _icoFlash;
     private SettingsWindow? _window;
     private DispatcherTimer? _flashTimer;
@@ -94,7 +95,8 @@ public sealed class QalamApp : Application
         Log.Mark("idle");
         var supported = layouts.Where(l => detector.Model(l.Language) != null).ToList();
         if (supported.Count == 0) supported = new() { KeyboardLayout.English, KeyboardLayout.Russian };
-        var engine = new SwitcherEngine(detector, supported, supported[0]);
+        Phrases = UserPhrases.Load(Path.Combine(QalamSettings.DataDir, "phrases.json"));
+        var engine = new SwitcherEngine(detector, supported, supported[0]) { Phrases = Phrases };
         Controller = new QalamController(platform, engine, Settings);
         Platform = platform;
         Controller.Corrected += c => Dispatcher.UIThread.Post(() => OnCorrected(c));
@@ -284,8 +286,10 @@ public sealed class QalamApp : Application
         _icoFlash = LoadIcon("tray-flash.png");
 
         var menu = new NativeMenu();
-        _autoItem = new NativeMenuItem("Автоисправление") { ToggleType = NativeMenuItemToggleType.CheckBox, IsChecked = Settings.AutoMode };
+        _autoItem = new NativeMenuItem("Автопереключение раскладки") { ToggleType = NativeMenuItemToggleType.CheckBox, IsChecked = Settings.AutoMode };
         _autoItem.Click += (_, _) => { if (Controller != null) Controller.AutoMode = !Controller.AutoMode; };
+        _typoItem = new NativeMenuItem("Исправлять опечатки") { ToggleType = NativeMenuItemToggleType.CheckBox, IsChecked = Settings.FixTypos };
+        _typoItem.Click += (_, _) => { Settings.FixTypos = !Settings.FixTypos; SaveSettings(); Changed?.Invoke(); };
         _pauseItem = new NativeMenuItem("Пауза") { ToggleType = NativeMenuItemToggleType.CheckBox, IsChecked = Settings.Paused };
         _pauseItem.Click += (_, _) => TogglePause();
         _menu = menu;
@@ -296,6 +300,7 @@ public sealed class QalamApp : Application
         var quit = new NativeMenuItem("Выйти");
         quit.Click += (_, _) => Quit();
         menu.Items.Add(_autoItem);
+        menu.Items.Add(_typoItem);
         menu.Items.Add(_pauseItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(settings);
@@ -315,6 +320,7 @@ public sealed class QalamApp : Application
     public void UpdateState()
     {
         if (_autoItem != null) _autoItem.IsChecked = Settings.AutoMode;
+        if (_typoItem != null) _typoItem.IsChecked = Settings.FixTypos;
         if (_pauseItem != null) _pauseItem.IsChecked = Settings.Paused;
         if (_tray != null)
         {
@@ -360,6 +366,7 @@ public sealed class QalamApp : Application
 
     public void Quit()
     {
+        Phrases?.Save();
         Controller?.Dispose();
         Neural?.Dispose();
         _ghost?.Close();

@@ -193,6 +193,117 @@ Console.WriteLine("\n=== Word completion ===");
     Check("stale neural answer ignored", shown == null);
 }
 
+// ---------- typos, context, learned phrases, model word completion ----------
+Console.WriteLine("\n=== Typos and context ===");
+{
+    var fp = new FakePlatform(layouts);
+    var settings = new QalamSettings { ManualHotkey = Hotkey.DoubleShift, ExcludedApps = new() };
+    var phrases = new UserPhrases();
+    var ctl = new QalamController(fp, new SwitcherEngine(new Detector(models), layouts, layouts[1]) { Phrases = phrases }, settings);
+    ctl.Engine.Speller!.WaitLoaded();
+    QalamController.Suggestion? shown = null;
+    ctl.SuggestionChanged += s => shown = s;
+    fp.Current = L["ru"];
+    fp.Type("мы превет ", L["ru"]);
+    Check($"typo fixed: '{fp.Screen}'", fp.Screen.ToString() == "мы привет ");
+    fp.Tap(SpecialKey.Shift); fp.Tap(SpecialKey.Shift);
+    Check($"typo undone by the manual hotkey: '{fp.Screen}'", fp.Screen.ToString() == "мы превет ");
+    fp.Type("превет ", L["ru"]);
+    Check($"undone typo is remembered: '{fp.Screen}'", fp.Screen.ToString() == "мы превет превет ");
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("Приевт как дела ", L["ru"]);
+    Check($"swapped letters at sentence start: '{fp.Screen}'", fp.Screen.ToString() == "Привет как дела ");
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("кто-то пришёл Фируз ", L["ru"]);
+    Check($"hyphen words and names untouched: '{fp.Screen}'", fp.Screen.ToString() == "кто-то пришёл Фируз ");
+    fp.Screen.Clear(); fp.Click(); fp.Current = L["en"];
+    fp.Type("I hvae a dog ", L["en"]);
+    Check($"English typo: '{fp.Screen}'", fp.Screen.ToString() == "I have a dog ");
+    settings.FixTypos = false; ctl.ApplySettings();
+    fp.Screen.Clear(); fp.Click(); fp.Current = L["ru"];
+    fp.Type("превед ", L["ru"]);
+    Check($"typo fixing can be switched off: '{fp.Screen}'", fp.Screen.ToString() == "превед ");
+    settings.FixTypos = true; ctl.ApplySettings();
+
+    // a complete word still gets longer forms: "дороги" → "дорогие"
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("дороги", L["ru"]);
+    Check($"complete word gets longer forms: {shown?.Text} [{string.Join(",", shown?.Alternatives ?? new List<string>())}]", shown != null && shown.Text.StartsWith("дороги") && shown.Text.Length > 6);
+    // Shift+Tab → next variant
+    var first = shown?.Text;
+    fp.Press(new KeyInput(true, SpecialKey.Tab, Shift: true, KeyName: "Tab"));
+    Check($"Shift+Tab shows another variant: {first} → {shown?.Text}", shown != null && shown.Text != first && fp.Screen.ToString() == "дороги");
+
+    // the user's own phrases: after "дорогие друзья" twice, "друзья" ranks first
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("дорогие друзья и дорогие друзья ", L["ru"]);
+    Check($"pairs learned: {phrases.Count("дорогие", "друзья")}", phrases.Count("дорогие", "друзья") == 2);
+    fp.Type("и дорогие ", L["ru"]);
+    Check($"next word after a space: {shown?.Text}", shown?.Text == "друзья" && shown.IsPhrase);
+    fp.Type("дру", L["ru"]);
+    Check($"learned word ranks first: {shown?.Text}", shown?.Text == "друзья");
+
+    // the model finishes a word in context
+    long ver = 0; ctl.PhraseOpportunity += (v, t) => ver = v;
+    settings.NeuralEnabled = true;
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("уважаемые колл", L["ru"]);
+    ctl.OfferPhrase(ver, "еги, рад вас видеть");
+    Check($"model ending: {shown?.Text}", shown?.Text == "коллеги, рад вас видеть");
+    fp.Type("е", L["ru"]);
+    Check($"model word kept while typing agrees: {shown?.Text}", shown?.Text == "коллеги, рад вас видеть");
+    fp.PressTab();
+    Check($"accepted: '{fp.Screen}'", fp.Screen.ToString() == "уважаемые коллеги, рад вас видеть");
+    fp.Screen.Clear(); fp.Click();
+    fp.Type("Мы сегодня рады предс", L["ru"]);
+    ctl.OfferPhrase(ver, "представить вам новый проект.");
+    Check($"model full word: {shown?.Text}", shown?.Text == "представить вам новый проект.");
+    ctl.OfferPhrase(ver, "<b>чепуха");
+    Check("markup ignored", shown?.Text == "представить вам новый проект.");
+    settings.NeuralEnabled = false;
+}
+
+Console.WriteLine("\n=== Typo correction on correct texts (must stay silent) ===");
+{
+    var sp = new SpellFixer(det); sp.WaitLoaded();
+    foreach (var (file, lang) in new[] { ("test_ru.txt", "ru"), ("test_en.txt", "en"), ("test_tg.txt", "tg"), ("lines_tg.txt", "tg") })
+    {
+        int n = 0, fixes = 0; var ex = new List<string>();
+        foreach (var line in File.ReadLines(Path.Combine(dir, file)))
+        {
+            bool start = true;
+            foreach (var tok in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                n++;
+                if (sp.Fix(tok, L[lang], lang, start) is { } r) { fixes++; ex.Add($"{tok}→{r}"); }
+                start = tok[^1] is '.' or '!' or '?';
+            }
+        }
+        Console.WriteLine($"  [{lang}] {file}: {n} words, corrected {fixes} {string.Join(" ", ex.Take(10))}");
+        if (fixes * 300 > n) failures++;   // > 0.33 %
+    }
+    int ok = 0; var typos = new[] { ("превет", "привет"), ("сдесь", "здесь"), ("незнаю", "не знаю"), ("пожалуйсто", "пожалуйста"), ("teh", "the"), ("recieve", "receive"), ("dont", "don't"), ("untill", "until"), ("ҳамчунн", "ҳамчун") };
+    foreach (var (bad, good) in typos)
+    {
+        var lang = bad[0] < 128 ? "en" : bad.Any(c => "ҳҷқғӯӣ".Contains(c)) ? "tg" : "ru";
+        var r = sp.Fix(bad, L[lang], lang, false);
+        if (r == good) ok++; else Console.WriteLine($"  miss: {bad} → {r ?? "-"} (expected {good})");
+    }
+    Check($"common typos fixed: {ok}/{typos.Length}", ok >= typos.Length - 1);
+}
+
+Console.WriteLine("\n=== Mid-word answers ===");
+{
+    Func<string, bool> known = w => models.Any(m => m.Frequency(w) != null);
+    Check("ending", PhraseText.CompleteWord("зья, мы рады", "дру", "дорогие ", known) == "друзья, мы рады");
+    Check("whole word", PhraseText.CompleteWord("друзья! Сегодня", "дру", "дорогие ", known) == "друзья!");
+    Check("echo of context", PhraseText.CompleteWord("дорогие друзья", "дру", "дорогие ", known) == "друзья");
+    Check("word already complete", PhraseText.CompleteWord(" и улицы", "дороги", "все ", known) == "дороги и улицы");
+    Check("capital kept", PhraseText.CompleteWord("зья", "Дру", "", known) == "Друзья");
+    Check("Tajik letters", PhraseText.CompleteWord("тоҷикистон", "точ", "", known) == "тоҷикистон");
+    Check("nonsense rejected", PhraseText.CompleteWord("ыыыы", "дру", "", known) == null);
+}
+
 // ---------- model answer cleaning ----------
 Console.WriteLine("\n=== Phrase cleaning ===");
 {
