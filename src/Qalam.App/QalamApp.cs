@@ -42,6 +42,11 @@ public sealed class QalamApp : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        Log.Info($"Qalam {typeof(QalamApp).Assembly.GetName().Version} start on {System.Runtime.InteropServices.RuntimeInformation.OSDescription} {System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("unhandled", e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, e) => { Log.Error("unobserved task", e.Exception); e.SetObserved(); };
+        Dispatcher.UIThread.UnhandledException += (_, e) => { Log.Error("UI exception", e.Exception); e.Handled = true; };
+        StartWatchdog();
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             bool startHidden = desktop.Args?.Contains("--tray") == true;
@@ -61,6 +66,7 @@ public sealed class QalamApp : Application
             foreach (var m in list) m.Warmup();   // prefix index for word completion
             return list;
         });
+        Log.Info($"dictionaries loaded: {string.Join(", ", models.Select(m => $"{m.Language}={m.WordCount}"))}");
         var user = UserDictionary.Load(Path.Combine(QalamSettings.DataDir, "user.json"));
         var detector = new Detector(models, user);
 
@@ -77,7 +83,10 @@ public sealed class QalamApp : Application
         }
         else return;
 
+        Log.Mark("reading layouts");
         var layouts = platform.GetLayouts();
+        Log.Info("layouts: " + string.Join(", ", layouts.Select(l => $"{l.Language}:{l.Id}")));
+        Log.Mark("idle");
         var supported = layouts.Where(l => detector.Model(l.Language) != null).ToList();
         if (supported.Count == 0) supported = new() { KeyboardLayout.English, KeyboardLayout.Russian };
         var engine = new SwitcherEngine(detector, supported, supported[0]);
@@ -90,7 +99,9 @@ public sealed class QalamApp : Application
         Controller.SuggestionChanged += sug => Dispatcher.UIThread.Post(() => OnSuggestion(sug));
         Controller.PhraseOpportunity += (v, text) => Neural.OnPhraseOpportunity(Controller, v, text);
 
-        if (platform.HasPermissions()) platform.Start();
+        bool perms = platform.HasPermissions();
+        Log.Info($"permissions: {perms}");
+        if (perms) platform.Start();
         else
         {
             // macOS: wait until the user grants Accessibility / Input Monitoring
@@ -100,6 +111,7 @@ public sealed class QalamApp : Application
             {
                 if (!platform.HasPermissions()) return;
                 retry.Stop();
+                Log.Info("permissions granted, starting");
                 platform.Start();
                 Changed?.Invoke();
             };
@@ -113,16 +125,44 @@ public sealed class QalamApp : Application
     {
         _popup ??= new SuggestionPopup();
         if (sug == null) { _popup.Hide(); return; }
-        // give the target app a moment to move its caret after the keystroke
-        DispatcherTimer.RunOnce(() =>
+        // The caret position is asked from the OTHER app (accessibility API) — it can be slow,
+        // so never on the UI thread, and with a hard time limit.
+        _ = Task.Run(async () =>
         {
+            await Task.Delay(30);   // let the target app move its caret after the keystroke
             if (Controller?.CurrentSuggestion != sug) return;
-            var caret = Platform?.GetCaretRect();
-            if (caret is not { } c) { _popup.Hide(); return; }
-            double scale = OperatingSystem.IsMacOS() ? (_popup.Screens.Primary?.Scaling ?? 1) : 1;  // macOS reports points
-            var pos = new PixelPoint((int)(c.X * scale), (int)((c.Y + c.H + 4) * scale));
-            _popup.ShowSuggestion(sug, pos);
-        }, TimeSpan.FromMilliseconds(30));
+            var query = Task.Run(() => { Log.Mark("caret query"); var r = Platform?.GetCaretRect(); Log.Mark("idle"); return r; });
+            var done = await Task.WhenAny(query, Task.Delay(400));
+            var caret = done == query ? query.Result : null;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (Controller?.CurrentSuggestion != sug) return;
+                if (caret is not { } c) { _popup.Hide(); return; }
+                double scale = OperatingSystem.IsMacOS() ? (_popup.Screens.Primary?.Scaling ?? 1) : 1;  // macOS reports points
+                _popup.ShowSuggestion(sug, new PixelPoint((int)(c.X * scale), (int)((c.Y + c.H + 4) * scale)));
+            });
+        });
+    }
+
+    /// <summary>Logs when the UI thread stops responding (and what the app was doing).</summary>
+    private static void StartWatchdog()
+    {
+        var t = new Thread(() =>
+        {
+            bool reported = false;
+            while (true)
+            {
+                Thread.Sleep(2000);
+                var ping = Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Send);
+                if (!ping.GetTask().Wait(5000))
+                {
+                    if (!reported) Log.Error($"UI thread not responding; last activity: '{Log.Current}' for {Log.CurrentFor.TotalSeconds:F0}s");
+                    reported = true;
+                }
+                else if (reported) { Log.Info("UI thread responsive again"); reported = false; }
+            }
+        }) { IsBackground = true, Name = "Qalam watchdog" };
+        t.Start();
     }
 
     private static WindowIcon LoadIcon(string name)

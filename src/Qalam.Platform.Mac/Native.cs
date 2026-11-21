@@ -62,6 +62,9 @@ internal static class Native
 
     [DllImport(AS)] public static extern bool AXIsProcessTrusted();
     [DllImport(AS)] public static extern IntPtr AXUIElementCreateSystemWide();
+    [DllImport(AS)] public static extern IntPtr AXUIElementCreateApplication(int pid);
+    [DllImport(AS)] public static extern int AXUIElementSetMessagingTimeout(IntPtr element, float seconds);
+    [DllImport(ObjC, EntryPoint = "objc_msgSend")] public static extern int objc_msgSend_int(IntPtr target, IntPtr selector);
     [DllImport(AS)] public static extern int AXUIElementCopyAttributeValue(IntPtr element, IntPtr attribute, out IntPtr value);
     [DllImport(AS)] public static extern int AXUIElementCopyParameterizedAttributeValue(IntPtr element, IntPtr attribute, IntPtr parameter, out IntPtr value);
     [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CGRect rect);

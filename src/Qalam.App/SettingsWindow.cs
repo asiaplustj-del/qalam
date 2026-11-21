@@ -67,6 +67,11 @@ public sealed class SettingsWindow : Window
             TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 6, 0, 0)
         });
 
+        var logBtn = Ui.GhostButton("Папка с журналом");
+        logBtn.HorizontalAlignment = HorizontalAlignment.Center;
+        logBtn.Click += (_, _) => { Directory.CreateDirectory(QalamSettings.DataDir); NeuralService.OpenUrl(QalamSettings.DataDir); };
+        root.Children.Add(logBtn);
+
         Content = new ScrollViewer { Content = root, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         _app.Changed += () => Dispatcher.UIThread.Post(Refresh);
         Refresh();

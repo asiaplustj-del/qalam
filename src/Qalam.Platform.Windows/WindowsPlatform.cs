@@ -305,7 +305,8 @@ public sealed class WindowsPlatform : IKeyboardPlatform
         try
         {
             var fg = GetForegroundWindow();
-            uint tid = GetWindowThreadProcessId(fg, out _);
+            uint tid = GetWindowThreadProcessId(fg, out uint fpid);
+            if (fpid == (uint)Environment.ProcessId) return null;
             var gti = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
             if (GetGUIThreadInfo(tid, ref gti) && gti.hwndCaret != IntPtr.Zero)
             {

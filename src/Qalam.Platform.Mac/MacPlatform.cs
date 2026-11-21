@@ -89,7 +89,8 @@ public sealed class MacPlatform : IKeyboardPlatform
             ulong mask = (1UL << kCGEventKeyDown) | (1UL << kCGEventKeyUp) | (1UL << kCGEventFlagsChanged)
                        | (1UL << kCGEventLeftMouseDown) | (1UL << kCGEventRightMouseDown) | (1UL << kCGEventOtherMouseDown);
             _tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, mask, _callback, IntPtr.Zero);
-            if (_tap == IntPtr.Zero) { ready.Set(); return; }   // no permission
+            if (_tap == IntPtr.Zero) { Log.Info("event tap NOT created (no permission?)"); ready.Set(); return; }
+            Log.Info("event tap created");
             var src = CFMachPortCreateRunLoopSource(IntPtr.Zero, _tap, 0);
             _runLoop = CFRunLoopGetCurrent();
             CFRunLoopAddSource(_runLoop, src, CommonModes);
@@ -325,6 +326,17 @@ public sealed class MacPlatform : IKeyboardPlatform
         catch { return null; }
     }
 
+    private static int FrontmostPid()
+    {
+        try
+        {
+            var ws = objc_msgSend(objc_getClass("NSWorkspace"), sel_registerName("sharedWorkspace"));
+            var app = objc_msgSend(ws, sel_registerName("frontmostApplication"));
+            return app == IntPtr.Zero ? -1 : objc_msgSend_int(app, sel_registerName("processIdentifier"));
+        }
+        catch { return -1; }
+    }
+
     public string? ForegroundApp()
     {
         try
@@ -348,8 +360,13 @@ public sealed class MacPlatform : IKeyboardPlatform
         IntPtr sys = IntPtr.Zero, focused = IntPtr.Zero, rangeVal = IntPtr.Zero, bounds = IntPtr.Zero;
         try
         {
-            sys = AXUIElementCreateSystemWide();
+            // Never query ourselves: our own AX answers need our main thread → self-deadlock.
+            int pid = FrontmostPid();
+            if (pid <= 0 || pid == Environment.ProcessId) return null;
+            sys = AXUIElementCreateApplication(pid);
+            AXUIElementSetMessagingTimeout(sys, 0.25f);   // slow apps (Chrome/Electron) must not stall us
             if (AXUIElementCopyAttributeValue(sys, AXFocused, out focused) != 0 || focused == IntPtr.Zero) return null;
+            AXUIElementSetMessagingTimeout(focused, 0.25f);
             if (AXUIElementCopyAttributeValue(focused, AXSelRange, out rangeVal) != 0 || rangeVal == IntPtr.Zero) return null;
             if (AXUIElementCopyParameterizedAttributeValue(focused, AXBoundsForRange, rangeVal, out bounds) == 0
                 && bounds != IntPtr.Zero && AXValueGetValue(bounds, kAXValueCGRectType, out CGRect r) && r.H > 0)
