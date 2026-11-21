@@ -116,6 +116,9 @@ jobs:
           if [ "$LARCH" = "arm64" ]; then "$DEST/llama-server" --version; fi
           du -sh "$DEST"
       - name: App bundle + DMG
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
           ARCH=$([ "${{ matrix.rid }}" = "osx-arm64" ] && echo "AppleSilicon" || echo "Intel")
           APP=out/Qalam.app
@@ -124,10 +127,27 @@ jobs:
           sed "s/__VERSION__/$QALAM_VERSION/g" packaging/macos/Info.plist > $APP/Contents/Info.plist
           cp packaging/macos/qalam.icns $APP/Contents/Resources/
           chmod +x $APP/Contents/MacOS/Qalam
-          # sign the engine's binaries one by one, then the whole app (ad-hoc)
-          find "$APP/Contents/MacOS/llama" -type f \( -name "*.dylib" -o -name "llama-server" \) -print0 | xargs -0 -n1 codesign --force --sign -
-          codesign --force --deep --sign - $APP
+          # Persistent self-signed identity (repo secrets) → macOS keeps Accessibility / Input Monitoring
+          # permissions across updates. Without the secrets: ad-hoc signature as before.
+          SIGN="-"
+          if [ -n "$MACOS_CERT_P12" ]; then
+            KC="$RUNNER_TEMP/qalam.keychain-db"; KCPW=$(openssl rand -hex 12)
+            echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/qalam.p12"
+            security create-keychain -p "$KCPW" "$KC"
+            security set-keychain-settings -lut 21600 "$KC"
+            security unlock-keychain -p "$KCPW" "$KC"
+            security import "$RUNNER_TEMP/qalam.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" > /dev/null
+            security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+            security find-certificate -c "Qalam Code Signing" -p "$KC" > "$RUNNER_TEMP/qalam-cert.pem"
+            sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/qalam-cert.pem" || echo "trust not added (ok)"
+            SIGN=$(security find-identity -p codesigning "$KC" | awk '/Qalam Code Signing/ {print $2; exit}')
+            echo "signing identity: $SIGN"
+          fi
+          find "$APP/Contents/MacOS/llama" -type f \( -name "*.dylib" -o -name "llama-server" \) -print0 | xargs -0 -n1 codesign --force --timestamp=none --sign "$SIGN"
+          codesign --force --deep --timestamp=none --sign "$SIGN" $APP
           codesign --verify --deep --strict $APP && echo "signature OK" || echo "::warning::codesign verify reported a problem"
+          echo "designated requirement:"; codesign -d -r- $APP 2>&1 | tail -2
           mkdir -p out/dmg && cp -R $APP out/dmg/ && ln -s /Applications out/dmg/Applications
           hdiutil create -volname Qalam -srcfolder out/dmg -ov -format UDZO "out/Qalam-$QALAM_VERSION-macOS-$ARCH.dmg"
       - uses: actions/upload-artifact@v4
