@@ -277,6 +277,30 @@ public sealed class SettingsWindow : Window
         return Ui.CardBox(p);
     }
 
+    /// <summary>A row of mutually exclusive buttons (segmented control).</summary>
+    private StackPanel Segments(string[] names, int selected, Action<int> pick)
+    {
+        var seg = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        var buttons = new List<ToggleButton>();
+        for (int i = 0; i < names.Length; i++)
+        {
+            int idx = i;
+            var tb = new ToggleButton
+            {
+                Content = names[i], IsChecked = i == selected, CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 6), FontSize = 13
+            };
+            tb.Click += (_, _) =>
+            {
+                pick(idx);
+                foreach (var b in buttons) b.IsChecked = b == tb;
+                _app.SaveSettings();
+            };
+            buttons.Add(tb); seg.Children.Add(tb);
+        }
+        return seg;
+    }
+
     private Grid BoolRow(string label, string? hint, bool value, Action<bool> set)
     {
         var sw = Ui.Switch(value);
@@ -303,6 +327,8 @@ public sealed class SettingsWindow : Window
         learnSw.IsCheckedChanged += (_, _) => { if (_loading) return; S.LearnPhrases = learnSw.IsChecked == true; _app.SaveSettings(); };
         learnRow.Children.Add(forget); learnRow.Children.Add(learnSw);
         p.Children.Add(Ui.Row("Учиться на моих фразах", "Qalam запоминает, какое слово вы обычно пишете после какого («дорогие» → «друзья»), и ставит его первым — в том числе сразу после пробела. Хранится только на этом компьютере и только обычные словарные слова — без паролей, чисел и имён.", learnRow));
+        p.Children.Add(BoolRow("Tab — по одному слову", "Каждое нажатие Tab вставляет одно слово или знак препинания: «друзья» → «,» → «как» → «дела» → «?». Остаток подсказки остаётся, а модель тут же продолжает фразу дальше. Выключите — Tab будет вставлять всю подсказку сразу.",
+            S.TabAcceptsWord, v => S.TabAcceptsWord = v));
         p.Children.Add(BoolRow("Подсказка прямо в строке", "Полупрозрачный текст сразу после курсора, как в Cotypist. Выключите — подсказка будет в отдельной плашке.",
             S.InlineSuggestions, v => S.InlineSuggestions = v));
         p.Children.Add(BoolRow("Плашка над строкой", "Только для режима с плашкой. На Mac снизу показывает свои подсказки сама система.",
@@ -414,6 +440,12 @@ public sealed class SettingsWindow : Window
         copyRow.Children.Add(_copyStatus);
         _builtinPanel.Children.Add(copyRow);
 
+        _builtinPanel.Children.Add(Ui.Row("Длина фраз", "Короткие — до 3 слов, средние — до 6, длинные — до 12 слов, может начаться и следующее предложение. Чем длиннее, тем дольше думает модель.",
+            Segments(new[] { "Короткие", "Средние", "Длинные" }, S.NeuralLength - 1, i => S.NeuralLength = i + 1)));
+        var pauses = new[] { 150, 300, 600 };
+        _builtinPanel.Children.Add(Ui.Row("Когда предлагать", "Через сколько после последней нажатой клавиши спрашивать модель. «Сразу» — подсказка чаще успевает, пока вы печатаете слово, но компьютер работает больше.",
+            Segments(new[] { "Сразу", "Обычно", "Спокойно" }, Math.Max(0, Array.IndexOf(pauses, S.NeuralPauseMs)), i => S.NeuralPauseMs = pauses[i])));
+
         _unloadBox.ItemsSource = UnloadChoices.Select(m => m == 0 ? "никогда" : m < 60 ? $"{m} мин" : "1 час").ToList();
         _unloadBox.SelectedIndex = Math.Max(0, Array.IndexOf(UnloadChoices, S.NeuralUnloadMinutes));
         _unloadBox.SelectionChanged += (_, _) =>
@@ -457,8 +489,8 @@ public sealed class SettingsWindow : Window
         var sample = "Завтра утром мы поедем на съёмки и ";
         _testResult.Text = $"Спрашиваю: «{sample}…»";
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var raw = await n.Engine.CompleteAsync(path!, sample, 16, default);
-        var clean = PhraseText.Clean(raw, sample);
+        var raw = await n.CompleteRawAsync(sample, default);
+        var clean = PhraseText.Clean(raw, sample, S.PhraseMaxWords, S.NeuralLength >= 3 ? 2 : 1);
         _testResult.Text = clean != null
             ? $"{sw.Elapsed.TotalSeconds:0.0} с · «{sample}{clean}»"
             : $"{sw.Elapsed.TotalSeconds:0.0} с · модель ответила неподходяще: «{raw}»";

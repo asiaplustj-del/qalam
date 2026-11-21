@@ -16,8 +16,11 @@ public sealed class QalamController : IDisposable
     public sealed record Suggestion(string Text, int Erase, string Insert, bool IsPhrase, IReadOnlyList<string> Alternatives, long Version, string Typed = "");
     /// <summary>Show/hide the suggestion popup (null = hide). Raised on the hook thread.</summary>
     public event Action<Suggestion?>? SuggestionChanged;
-    /// <summary>The user finished a word: a neural module may propose a continuation of <c>text</c>.</summary>
-    public event Action<long, string>? PhraseOpportunity;
+    /// <summary>A moment to ask the model: after a space, on a pause inside a word, after Tab.</summary>
+    /// <param name="Urgent">Ask right away (the user just accepted a word with Tab) instead of after a pause.</param>
+    public sealed record PhraseRequest(long Version, string Text, bool MidWord, bool Urgent);
+    /// <summary>A neural module may propose a continuation of the text.</summary>
+    public event Action<PhraseRequest>? PhraseOpportunity;
     public Suggestion? CurrentSuggestion { get; private set; }
     public Completer Completer { get; }
     private long _version;
@@ -105,17 +108,27 @@ public sealed class QalamController : IDisposable
         bool isModifier = k.Special is SpecialKey.Shift or SpecialKey.Ctrl or SpecialKey.Alt or SpecialKey.Meta;
         if (!k.IsDown || isModifier) return Handle(k);
 
-        // Tab accepts the visible suggestion
+        // Tab accepts the visible suggestion — one word (or punctuation mark) per press, or all of it
         if (k.Special == SpecialKey.Tab && !k.Ctrl && !k.Alt && !k.Meta && !k.Shift && CurrentSuggestion is { } sug && !Recording)
         {
-            _platform.Replace(sug.Erase, sug.Insert);
-            Engine.AcceptCompletion(sug.Insert);
+            var (accept, rest) = Settings.TabAcceptsWord ? PhraseText.FirstChunk(sug.Insert) : (sug.Insert, "");
+            if (accept.Length == 0) (accept, rest) = (sug.Insert, "");
+            _platform.Replace(sug.Erase, accept);
+            Engine.AcceptCompletion(accept);
             _modelWord = null;
             _swallowUp = "Tab";
             _version++;
-            ClearSuggestion();
+            if (rest.Trim().Length > 0)
+            {
+                _remainder = true;
+                SetSuggestion(new Suggestion(rest, 0, rest, true, Array.Empty<string>(), _version));
+            }
+            else { _remainder = false; ClearSuggestion(); }
+            // the model continues from the new text: the phrase keeps growing as you accept it
+            if (Settings.NeuralEnabled && !_excludedCache) PhraseOpportunity?.Invoke(new PhraseRequest(_version, Engine.FieldText, false, true));
             return true;
         }
+        _remainder = false;
 
         // Shift+Tab: next variant of the word (only while a suggestion with variants is visible)
         if (k.Special == SpecialKey.Tab && k.Shift && !k.Ctrl && !k.Alt && !k.Meta && CurrentSuggestion is { Alternatives.Count: > 0 } cur && !Recording)
@@ -136,7 +149,7 @@ public sealed class QalamController : IDisposable
                 UpdateWordSuggestion();
                 // a pause in the middle of a word → the model may finish it in context ("дорогие дру" → "друзья")
                 if (Settings.NeuralEnabled && !_excludedCache && Engine.WordInProgress && Engine.CurrentWordText.Length >= 2)
-                    PhraseOpportunity?.Invoke(_version, Engine.FieldText);
+                    PhraseOpportunity?.Invoke(new PhraseRequest(_version, Engine.FieldText, true, false));
                 break;
             case SpecialKey.Backspace:
                 UpdateWordSuggestion();
@@ -144,7 +157,7 @@ public sealed class QalamController : IDisposable
             case SpecialKey.Space:
                 _modelWord = null;
                 ShowLearnedNextWord();
-                if (Settings.NeuralEnabled && !_excludedCache) PhraseOpportunity?.Invoke(_version, Engine.FieldText);
+                if (Settings.NeuralEnabled && !_excludedCache) PhraseOpportunity?.Invoke(new PhraseRequest(_version, Engine.FieldText, false, false));
                 break;
             default:
                 _modelWord = null;
@@ -156,6 +169,8 @@ public sealed class QalamController : IDisposable
 
     // the model's word for the current position: kept while the user types letters that agree with it
     private (string Context, string Text)? _modelWord;
+    // the visible suggestion is what is left of a phrase after Tab
+    private bool _remainder;
 
     private void UpdateWordSuggestion()
     {
@@ -198,16 +213,25 @@ public sealed class QalamController : IDisposable
             if (version != _version || Settings.Paused || string.IsNullOrWhiteSpace(text)) return;
             if (!Engine.WordInProgress)
             {
-                var phrase = PhraseText.Clean(text, Engine.FieldText);
+                var field = Engine.FieldText;
+                var phrase = PhraseText.Clean(text, field, Settings.PhraseMaxWords, Settings.NeuralLength >= 3 ? 2 : 1);
                 if (phrase == null) return;
-                var alts = CurrentSuggestion is { IsPhrase: true } learned && !phrase.StartsWith(learned.Text + " ", StringComparison.OrdinalIgnoreCase)
+                // the text ends right after a word or a mark ("друзья", "дела?") → a word needs a space first
+                if (field.Length > 0 && !char.IsWhiteSpace(field[^1]) && char.IsLetterOrDigit(phrase[0])) phrase = " " + phrase;
+                if (_remainder && CurrentSuggestion is { IsPhrase: true } shown)
+                {
+                    // keep what is already shown unless the new answer continues it and is longer
+                    var head = PhraseText.FirstChunk(shown.Text).Chunk.Trim();
+                    if (!phrase.TrimStart().StartsWith(head, StringComparison.OrdinalIgnoreCase) || phrase.Length <= shown.Text.Length) return;
+                }
+                var alts = CurrentSuggestion is { IsPhrase: true } learned && !_remainder && !phrase.TrimStart().StartsWith(learned.Text + " ", StringComparison.OrdinalIgnoreCase)
                     ? new List<string> { learned.Text } : new List<string>();
                 SetSuggestion(new Suggestion(phrase, 0, phrase, true, alts, version));
                 return;
             }
             var typed = Engine.CurrentWordText;
             var before = Engine.FieldText[..^typed.Length];
-            var full = PhraseText.CompleteWord(text, typed, before, IsWord);
+            var full = PhraseText.CompleteWord(text, typed, before, IsWord, Math.Max(2, Settings.PhraseMaxWords - 1));
             if (full == null) return;
             _modelWord = (before, full);
             UpdateWordSuggestion();

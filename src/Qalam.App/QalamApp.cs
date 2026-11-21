@@ -105,7 +105,7 @@ public sealed class QalamApp : Application
         Neural.Engine.StateChanged += () => Dispatcher.UIThread.Post(() => Changed?.Invoke());
         _ = Neural.RefreshAsync().ContinueWith(_ => Dispatcher.UIThread.Post(() => Changed?.Invoke()));
         Controller.SuggestionChanged += sug => Dispatcher.UIThread.Post(() => OnSuggestion(sug));
-        Controller.PhraseOpportunity += (v, text) => Neural.OnPhraseOpportunity(Controller, v, text);
+        Controller.PhraseOpportunity += req => Neural.OnPhraseOpportunity(Controller, req);
 
         bool perms = platform.HasPermissions();
         Log.Info($"permissions: {perms}");

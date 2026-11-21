@@ -71,7 +71,7 @@ public sealed class LlamaEngine : IDisposable
     /// Continue <paramref name="prompt"/>. Returns null while the model is still loading
     /// (typing is never blocked waiting for it), on errors, or when cancelled.
     /// </summary>
-    public async Task<string?> CompleteAsync(string modelPath, string prompt, int maxTokens, CancellationToken ct)
+    public async Task<string?> CompleteAsync(string modelPath, string prompt, int maxTokens, CancellationToken ct, string? instruction = null)
     {
         _lastUse = DateTime.UtcNow;
         if (State != EngineState.Ready || LoadedModel != modelPath)
@@ -87,7 +87,7 @@ public sealed class LlamaEngine : IDisposable
             {
                 messages = new object[]
                 {
-                    new { role = "system", content = Instruction },
+                    new { role = "system", content = instruction ?? Instruction },
                     new { role = "user", content = prompt },
                 },
                 max_tokens = maxTokens,
@@ -125,11 +125,20 @@ public sealed class LlamaEngine : IDisposable
         }
     }
 
+    /// <summary>The request for a chosen phrase length (1 short, 2 medium, 3 long).</summary>
+    public static string InstructionFor(int length) => length switch
+    {
+        1 => Instruction.Replace("от 2 до 6 слов", "от 1 до 3 слов"),
+        3 => Instruction.Replace("от 2 до 6 слов", "до 12 слов; можно закончить предложение и начать следующее"),
+        _ => Instruction,
+    };
+
     /// <summary>What we ask the model to do (works for Russian, Tajik and English text).</summary>
     public const string Instruction =
         "Ты — автодополнение текста, как подсказки на клавиатуре телефона. Пользователь присылает текст, который он сейчас печатает. " +
         "Допиши естественное продолжение последней фразы: от 2 до 6 слов, на том же языке и в том же стиле. " +
         "Если последнее слово не допечатано — начни с его окончания. " +
+        "Согласуй слова с уже написанными по роду, числу и падежу. " +
         "Выведи ТОЛЬКО само продолжение: без кавычек, пояснений, приветствий и без повторения уже написанного текста.";
 
     /// <summary>Waits (up to <paramref name="timeout"/>) until the model is loaded. For the "check" button.</summary>

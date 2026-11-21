@@ -181,15 +181,18 @@ Console.WriteLine("\n=== Word completion ===");
     Check("Tab passes through without suggestion", fp.Screen.ToString() == "как\t");
     long ver = 0; string? ctxText = null;
     settings.NeuralEnabled = true;
-    ctl.PhraseOpportunity += (v, t) => { ver = v; ctxText = t; };
+    ctl.PhraseOpportunity += r => { ver = r.Version; ctxText = r.Text; };
     fp.Screen.Clear(); fp.Click();
     fp.Type("мы снимаем ", L["ru"]);
     Check($"phrase opportunity with context '{ctxText}'", ctxText == "мы снимаем ");
     ctl.OfferPhrase(ver, "новый фильм");
+    long staleVer = ver;
     Check($"phrase offered: {shown?.Text}", shown?.IsPhrase == true);
     fp.PressTab();
-    Check($"phrase accepted: '{fp.Screen}'", fp.Screen.ToString() == "мы снимаем новый фильм");
-    ctl.OfferPhrase(ver, "устаревший ответ");
+    Check($"Tab takes one word: '{fp.Screen}' + {shown?.Text}", fp.Screen.ToString() == "мы снимаем новый" && shown?.Text == " фильм");
+    fp.PressTab();
+    Check($"phrase accepted: '{fp.Screen}'", fp.Screen.ToString() == "мы снимаем новый фильм" && shown == null);
+    ctl.OfferPhrase(staleVer, "устаревший ответ");
     Check("stale neural answer ignored", shown == null);
 }
 
@@ -244,7 +247,7 @@ Console.WriteLine("\n=== Typos and context ===");
     Check($"learned word ranks first: {shown?.Text}", shown?.Text == "друзья");
 
     // the model finishes a word in context
-    long ver = 0; ctl.PhraseOpportunity += (v, t) => ver = v;
+    long ver = 0; ctl.PhraseOpportunity += r => ver = r.Version;
     settings.NeuralEnabled = true;
     fp.Screen.Clear(); fp.Click();
     fp.Type("уважаемые колл", L["ru"]);
@@ -253,7 +256,21 @@ Console.WriteLine("\n=== Typos and context ===");
     fp.Type("е", L["ru"]);
     Check($"model word kept while typing agrees: {shown?.Text}", shown?.Text == "коллеги, рад вас видеть");
     fp.PressTab();
-    Check($"accepted: '{fp.Screen}'", fp.Screen.ToString() == "уважаемые коллеги, рад вас видеть");
+    Check($"Tab → word: '{fp.Screen}' + '{shown?.Text}'", fp.Screen.ToString() == "уважаемые коллеги" && shown?.Text == ", рад вас видеть");
+    fp.PressTab();
+    Check($"Tab → comma: '{fp.Screen}'", fp.Screen.ToString() == "уважаемые коллеги,");
+    ctl.OfferPhrase(ver, "рад вас видеть. Как ваши дела?");
+    Check($"model extends the rest: '{shown?.Text}'", shown?.Text == " рад вас видеть.");
+    ctl.OfferPhrase(ver, "мы начинаем");
+    Check($"a different answer does not replace it: '{shown?.Text}'", shown?.Text == " рад вас видеть.");
+    fp.PressTab(); fp.PressTab(); fp.PressTab(); fp.PressTab();
+    Check($"word by word to the end: '{fp.Screen}'", fp.Screen.ToString() == "уважаемые коллеги, рад вас видеть." && shown == null);
+    ctl.OfferPhrase(ver, "Как ваши дела?");
+    Check($"next sentence after the end: '{shown?.Text}'", shown?.Text == " Как ваши дела?");
+    settings.TabAcceptsWord = false;
+    fp.PressTab();
+    Check($"whole suggestion when word-by-word is off: '{fp.Screen}'", fp.Screen.ToString() == "уважаемые коллеги, рад вас видеть. Как ваши дела?");
+    settings.TabAcceptsWord = true;
     fp.Screen.Clear(); fp.Click();
     fp.Type("Мы сегодня рады предс", L["ru"]);
     ctl.OfferPhrase(ver, "представить вам новый проект.");
@@ -294,6 +311,8 @@ Console.WriteLine("\n=== Typo correction on correct texts (must stay silent) ===
 
 Console.WriteLine("\n=== Mid-word answers ===");
 {
+    Check("chunks", PhraseText.FirstChunk("друзья, как дела?") == ("друзья", ", как дела?") && PhraseText.FirstChunk(", как дела?") == (",", " как дела?")
+                    && PhraseText.FirstChunk(" как дела?") == (" как", " дела?") && PhraseText.FirstChunk("?") == ("?", "") && PhraseText.FirstChunk(" кто-то пришёл") == (" кто-то", " пришёл"));
     Func<string, bool> known = w => models.Any(m => m.Frequency(w) != null);
     Check("ending", PhraseText.CompleteWord("зья, мы рады", "дру", "дорогие ", known) == "друзья, мы рады");
     Check("whole word", PhraseText.CompleteWord("друзья! Сегодня", "дру", "дорогие ", known) == "друзья!");

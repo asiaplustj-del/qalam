@@ -79,7 +79,15 @@ public sealed class QalamSettings
     public string NeuralUrl { get; set; } = "http://localhost:11434";
     public string NeuralModel { get; set; } = "gemma3:1b";
     /// <summary>Pause after a space before asking the model, ms.</summary>
-    public int NeuralDelayMs { get; set; } = 400;
+    public int NeuralDelayMs { get; set; } = 400;   // old setting, replaced by NeuralPauseMs
+    /// <summary>Pause after the last keystroke before the model is asked, ms (0.15 / 0.3 / 0.6 s in the UI).</summary>
+    public int NeuralPauseMs { get; set; } = 150;
+    /// <summary>Phrase length: 1 = short (up to 3 words), 2 = medium (up to 6), 3 = long (up to 12, may start the next sentence).</summary>
+    public int NeuralLength { get; set; } = 2;
+    /// <summary>Tab inserts one word (or one punctuation mark) at a time; off = the whole suggestion at once.</summary>
+    public bool TabAcceptsWord { get; set; } = true;
+    [JsonIgnore] public int PhraseMaxWords => NeuralLength switch { 1 => 3, 3 => 12, _ => 6 };
+    [JsonIgnore] public int PhraseMaxTokens => NeuralLength switch { 1 => 8, 3 => 32, _ => 16 };
     /// <summary>"builtin" — llama.cpp inside Qalam with a GGUF file; "ollama" — external Ollama server.</summary>
     public string NeuralBackend { get; set; } = "builtin";
     /// <summary>GGUF model file for the built-in engine.</summary>

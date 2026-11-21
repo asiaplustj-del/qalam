@@ -110,8 +110,10 @@ public sealed class NeuralService : IDisposable
     /// Called after each space and on pauses inside a word: waits a little (typing on cancels it),
     /// then asks the model to continue the text. The controller decides what to show.
     /// </summary>
-    public void OnPhraseOpportunity(QalamController controller, long version, string fieldText)
+    public void OnPhraseOpportunity(QalamController controller, QalamController.PhraseRequest req)
     {
+        long version = req.Version;
+        var fieldText = req.Text;
         if (!_s.NeuralEnabled) return;
         if (UseBuiltin && !ModelFiles.IsUsable(_s.NeuralModelPath)) { LogSkip("no model file chosen"); return; }
         if (_s.NeuralSkipOnBattery && _platform?.IsOnBattery() == true) { LogSkip("on battery"); return; }
@@ -123,9 +125,11 @@ public sealed class NeuralService : IDisposable
         {
             try
             {
-                await Task.Delay(_s.NeuralDelayMs, cts.Token);
+                if (!req.Urgent) await Task.Delay(Math.Clamp(_s.NeuralPauseMs, 0, 2000), cts.Token);
                 if (UseBuiltin && Engine.State != LlamaEngine.EngineState.Ready) LogSkip($"engine {Engine.State} — loading the model, suggestions start when it is ready");
-                var raw = await CompleteRawAsync(context, cts.Token);
+                // inside a word a short answer is enough (and quicker): the word and a few more
+                int tokens = req.MidWord ? Math.Min(10, _s.PhraseMaxTokens) : _s.PhraseMaxTokens;
+                var raw = await CompleteRawAsync(context, cts.Token, tokens);
                 if (cts.IsCancellationRequested) return;
                 _asked++;
                 if (string.IsNullOrWhiteSpace(raw)) _empty++; else _answered++;
@@ -145,12 +149,13 @@ public sealed class NeuralService : IDisposable
 
     /// <summary>For the "check" button: a cleaned continuation of <paramref name="context"/>.</summary>
     public async Task<string?> CompleteAsync(string context, CancellationToken ct) =>
-        PhraseText.Clean(await CompleteRawAsync(context, ct), context);
+        PhraseText.Clean(await CompleteRawAsync(context, ct), context, _s.PhraseMaxWords, _s.NeuralLength >= 3 ? 2 : 1);
 
-    public async Task<string?> CompleteRawAsync(string context, CancellationToken ct)
+    public async Task<string?> CompleteRawAsync(string context, CancellationToken ct, int maxTokens = 0)
     {
+        if (maxTokens <= 0) maxTokens = _s.PhraseMaxTokens;
         if (UseBuiltin)
-            return await Engine.CompleteAsync(_s.NeuralModelPath!, context, 16, ct);
+            return await Engine.CompleteAsync(_s.NeuralModelPath!, context, maxTokens, ct, LlamaEngine.InstructionFor(_s.NeuralLength));
         var body = new
         {
             model = _s.NeuralModel,
@@ -158,7 +163,7 @@ public sealed class NeuralService : IDisposable
             raw = true,
             stream = false,
             keep_alive = "30m",
-            options = new { num_predict = 14, temperature = 0.2, top_p = 0.9, stop = new[] { "\n" } }
+            options = new { num_predict = maxTokens, temperature = 0.2, top_p = 0.9, stop = new[] { "\n" } }
         };
         using var resp = await _http.PostAsJsonAsync(Url("/api/generate"), body, ct);
         if (!resp.IsSuccessStatusCode) { LastError = $"HTTP {(int)resp.StatusCode}"; return null; }

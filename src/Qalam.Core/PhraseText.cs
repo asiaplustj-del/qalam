@@ -5,7 +5,9 @@ public static class PhraseText
 {
     private static readonly char[] Quotes = { '"', '«', '»', '“', '”', '„', '\'', '`' };
 
-    public static string? Clean(string? raw, string context)
+    /// <param name="maxWords">Longest continuation kept.</param>
+    /// <param name="sentences">How many sentence ends may be included (1 = stop at the first one).</param>
+    public static string? Clean(string? raw, string context, int maxWords = 7, int sentences = 1)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
         var t = raw.Replace('\n', ' ').Trim().Trim(Quotes).Trim();
@@ -23,10 +25,9 @@ public static class PhraseText
             }
         }
 
-        int cut = t.IndexOfAny(new[] { '.', '!', '?', '…' });
-        if (cut >= 0) t = t[..(cut + 1)];
+        t = CutSentences(t, sentences);
         var words = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length > 7) t = string.Join(' ', words.Take(7));
+        if (words.Length > maxWords) t = string.Join(' ', words.Take(maxWords));
         t = t.Trim().Trim(Quotes).TrimEnd();
         if (t.Length < 2 || t.Contains('<') || t.Contains('*') || t.Contains('#') || t.Contains("http")) return null;
         return t;
@@ -37,7 +38,7 @@ public static class PhraseText
     /// with the ending ("зья, рад вас видеть") or with the whole word ("друзья, рад…"). Returns the
     /// finished word plus a short continuation ("друзья, рад вас видеть"), or null.
     /// </summary>
-    public static string? CompleteWord(string? raw, string typed, string contextBefore, Func<string, bool> isWord)
+    public static string? CompleteWord(string? raw, string typed, string contextBefore, Func<string, bool> isWord, int maxMoreWords = 5)
     {
         if (string.IsNullOrWhiteSpace(raw) || typed.Length == 0) return null;
         // a leading space: the model treats the typed word as finished ("дороги" + " и улицы")
@@ -72,13 +73,43 @@ public static class PhraseText
         if (word.StartsWith(typed, StringComparison.OrdinalIgnoreCase)) word = typed + word[typed.Length..];
 
         // a short continuation: up to the end of the sentence, at most 5 more words
-        int cut = rest.IndexOfAny(new[] { '.', '!', '?', '…' });
-        if (cut >= 0) rest = rest[..(cut + 1)];
+        rest = CutSentences(rest, 1);
         var words = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length > 5) rest = (rest.StartsWith(' ') ? " " : "") + string.Join(' ', words.Take(5));
+        if (words.Length > maxMoreWords) rest = (rest.StartsWith(' ') ? " " : "") + string.Join(' ', words.Take(maxMoreWords));
         rest = rest.TrimEnd().TrimEnd(Quotes);
         var result = word + rest;
         if (result.Length <= typed.Length || result.Contains('<') || result.Contains('*') || result.Contains('#') || result.Contains("http")) return null;
         return result;
+    }
+
+    private static string CutSentences(string t, int sentences)
+    {
+        int from = 0;
+        for (int n = 0; n < sentences; n++)
+        {
+            int cut = t.IndexOfAny(new[] { '.', '!', '?', '…' }, from);
+            if (cut < 0) return t;
+            while (cut + 1 < t.Length && t[cut + 1] is '.' or '!' or '?' or '…') cut++;   // "?!", "..."
+            if (n == sentences - 1) return t[..(cut + 1)];
+            from = cut + 1;
+        }
+        return t;
+    }
+
+    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c is '-' or '\'' or '’';
+
+    /// <summary>
+    /// What one Tab press inserts: the next word, or the next punctuation mark ("друзья, как дела?" →
+    /// "друзья" | ", " … → "," | " как" | " дела" | "?"). Returns the chunk and the rest.
+    /// </summary>
+    public static (string Chunk, string Tail) FirstChunk(string text)
+    {
+        int i = 0;
+        while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+        if (i < text.Length && IsWordChar(text[i]))
+            while (i < text.Length && IsWordChar(text[i])) i++;
+        else
+            while (i < text.Length && !char.IsWhiteSpace(text[i]) && !IsWordChar(text[i])) i++;
+        return (text[..i], text[i..]);
     }
 }
