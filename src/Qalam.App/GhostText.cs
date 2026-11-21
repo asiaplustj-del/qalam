@@ -17,7 +17,14 @@ public sealed class GhostText : Window
         Foreground = new SolidColorBrush(Color.FromArgb(150, 128, 128, 136)),
         VerticalAlignment = VerticalAlignment.Center,
         IsHitTestVisible = false,
-        FontFamily = new FontFamily(OperatingSystem.IsMacOS() ? ".AppleSystemUIFont, SF Pro Text, Helvetica Neue" : "Segoe UI, Arial"),
+        // the app's embedded Inter: the macOS system UI font gave garbage glyphs in this window
+    };
+    private readonly TextBlock _more = new()
+    {
+        Foreground = new SolidColorBrush(Color.FromArgb(110, 128, 128, 136)),
+        VerticalAlignment = VerticalAlignment.Center,
+        IsHitTestVisible = false,
+        Margin = new Thickness(8, 0, 0, 0),
     };
 
     public GhostText()
@@ -32,7 +39,7 @@ public sealed class GhostText : Window
         SizeToContent = SizeToContent.WidthAndHeight;
         Background = Brushes.Transparent;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
-        Content = _text;
+        Content = new StackPanel { Orientation = Orientation.Horizontal, Children = { _text, _more } };
     }
 
     /// <param name="caretTop">Caret top-left, physical pixels.</param>
@@ -52,6 +59,10 @@ public sealed class GhostText : Window
         _text.LineHeight = lineDip;
         _text.Height = lineDip;
         _text.Text = ghost;
+        int n = s.Alternatives.Count;
+        _more.IsVisible = n > 0;
+        _more.FontSize = Math.Max(9, _text.FontSize * 0.75);
+        _more.Text = $"ещё {n} · ⇧Tab";
         Position = new PixelPoint(caretTop.X + (int)Math.Round(1 * scaling), caretTop.Y);
         if (!IsVisible) Show();
     }

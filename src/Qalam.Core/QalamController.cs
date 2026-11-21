@@ -113,6 +113,16 @@ public sealed class QalamController : IDisposable
             return true;
         }
 
+        // Shift+Tab: next variant of the word (only while a suggestion with variants is visible)
+        if (k.Special == SpecialKey.Tab && k.Shift && !k.Ctrl && !k.Alt && !k.Meta && CurrentSuggestion is { Alternatives.Count: > 0 } cur && !Recording)
+        {
+            var alts = cur.Alternatives.Skip(1).Append(cur.Text).ToList();
+            var next = cur.Alternatives[0];
+            _swallowUp = "Tab";
+            SetSuggestion(cur with { Text = next, Insert = next, Alternatives = alts });
+            return true;
+        }
+
         bool swallowed = Handle(k);
         _version++;
         if (Settings.Paused || Recording) { ClearSuggestion(); return swallowed; }
