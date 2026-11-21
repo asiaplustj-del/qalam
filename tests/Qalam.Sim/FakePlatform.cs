@@ -22,6 +22,7 @@ sealed class FakePlatform : IKeyboardPlatform
     public string? ForegroundApp() => "Notepad";
     public (int X, int Y, int W, int H)? GetCaretRect() => (100, 100, 1, 16);
     public void SetStartWithSystem(bool e) { }
+    public bool IsOnBattery() => false;
     public void Dispose() { }
     public void Click() => MouseClicked?.Invoke();
 

@@ -69,6 +69,14 @@ public sealed class QalamSettings
     public string NeuralModel { get; set; } = "gemma3:1b";
     /// <summary>Pause after a space before asking the model, ms.</summary>
     public int NeuralDelayMs { get; set; } = 400;
+    /// <summary>"builtin" — llama.cpp inside Qalam with a GGUF file; "ollama" — external Ollama server.</summary>
+    public string NeuralBackend { get; set; } = "builtin";
+    /// <summary>GGUF model file for the built-in engine.</summary>
+    public string? NeuralModelPath { get; set; }
+    /// <summary>Unload the model from memory after this many idle minutes (0 = keep loaded).</summary>
+    public int NeuralUnloadMinutes { get; set; } = 10;
+    /// <summary>Don't run the model while a laptop is on battery.</summary>
+    public bool NeuralSkipOnBattery { get; set; }
     /// <summary>1 = careful … 3 = aggressive (n-gram margin for unknown words).</summary>
     public int Sensitivity { get; set; } = 2;
 

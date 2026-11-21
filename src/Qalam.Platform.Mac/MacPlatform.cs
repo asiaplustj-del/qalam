@@ -395,6 +395,19 @@ public sealed class MacPlatform : IKeyboardPlatform
         }
     }
 
+    public bool IsOnBattery()
+    {
+        IntPtr blob = IntPtr.Zero;
+        try
+        {
+            blob = IOPSCopyPowerSourcesInfo();
+            if (blob == IntPtr.Zero) return false;
+            return CFString(IOPSGetProvidingPowerSourceType(blob)) == "Battery Power";
+        }
+        catch { return false; }
+        finally { if (blob != IntPtr.Zero) CFRelease(blob); }
+    }
+
     public void SetStartWithSystem(bool enabled)
     {
         try

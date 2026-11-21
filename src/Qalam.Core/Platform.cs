@@ -48,4 +48,6 @@ public interface IKeyboardPlatform : IDisposable
     /// <summary>Text caret rectangle on screen in physical pixels (top-left origin), or null if unknown.</summary>
     (int X, int Y, int W, int H)? GetCaretRect();
     void SetStartWithSystem(bool enabled);
+    /// <summary>True when a laptop runs on battery (no charger).</summary>
+    bool IsOnBattery();
 }

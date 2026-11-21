@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Qalam.Core;
 
@@ -293,11 +294,29 @@ public sealed class SettingsWindow : Window
     }
 
     // ------------------------------------------------------------------ neural module
+    private ToggleSwitch? _neuralSwitch;
+    private readonly ToggleButton _btnBuiltin = new() { Content = "Встроенный движок", CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 6), FontSize = 13 };
+    private readonly ToggleButton _btnOllama = new() { Content = "Ollama", CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 6), FontSize = 13 };
+    private readonly StackPanel _builtinPanel = new() { Spacing = 6 };
+    private readonly StackPanel _ollamaPanel = new() { Spacing = 6 };
+
+    // built-in engine
+    private readonly TextBlock _engineStatus = new() { FontSize = 13, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _modelLabel = new() { FontSize = 13, Foreground = Ui.Text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui.Mono };
+    private readonly ComboBox _foundModels = new() { MinWidth = 300, PlaceholderText = "Модели на этом компьютере" };
+    private readonly Button _copyButton = Ui.GhostButton("Скопировать к себе");
+    private readonly TextBlock _copyStatus = new() { FontSize = 12, Foreground = Ui.Muted, TextWrapping = TextWrapping.Wrap };
+    private readonly ComboBox _unloadBox = new() { MinWidth = 150 };
+    private List<ModelFiles.Found> _found = new();
+    private bool _scanning;
+    private CancellationTokenSource? _copyCts;
+    private static readonly int[] UnloadChoices = { 5, 10, 30, 60, 0 };
+
+    // Ollama
     private readonly TextBlock _neuralStatus = new() { FontSize = 13, Foreground = Ui.Muted, TextWrapping = TextWrapping.Wrap };
     private readonly ComboBox _neuralModels = new() { MinWidth = 260 };
     private readonly Button _pullButton = Ui.GhostButton("Скачать модель");
     private readonly Button _installOllama = Ui.PrimaryButton("Установить Ollama", yellow: true);
-    private ToggleSwitch? _neuralSwitch;
     private CancellationTokenSource? _pullCts;
     private string _neuralSig = "";
 
@@ -308,17 +327,173 @@ public sealed class SettingsWindow : Window
         head.Children.Add(Ui.Badge("✦", yellow: true));
         var mid = new StackPanel { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(Ui.Title("Нейро-подсказки · модуль"));
-        mid.Children.Add(Ui.Hint("Продолжение фразы после пробела от локальной языковой модели. Выключено по умолчанию."));
+        mid.Children.Add(Ui.Hint("Продолжение фразы после пробела от локальной языковой модели. Tab — вставить. Выключено по умолчанию."));
         Grid.SetColumn(mid, 1); head.Children.Add(mid);
         _neuralSwitch = Ui.Switch(S.NeuralEnabled);
         _neuralSwitch.VerticalAlignment = VerticalAlignment.Center;
-        _neuralSwitch.IsCheckedChanged += (_, _) => { if (_loading) return; S.NeuralEnabled = _neuralSwitch.IsChecked == true; _app.SaveSettings(); };
+        _neuralSwitch.IsCheckedChanged += (_, _) =>
+        {
+            if (_loading) return;
+            S.NeuralEnabled = _neuralSwitch.IsChecked == true;
+            _app.SaveSettings();
+            _app.Neural?.ApplySettings(userAction: true);
+            Refresh();
+        };
         Grid.SetColumn(_neuralSwitch, 2); head.Children.Add(_neuralSwitch);
         p.Children.Add(head);
 
-        _neuralStatus.Margin = new Thickness(0, 10, 0, 4);
-        p.Children.Add(_neuralStatus);
+        var seg = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 12, 0, 6) };
+        _btnBuiltin.Click += (_, _) => SetBackend("builtin");
+        _btnOllama.Click += (_, _) => SetBackend("ollama");
+        seg.Children.Add(_btnBuiltin); seg.Children.Add(_btnOllama);
+        p.Children.Add(seg);
 
+        BuildBuiltinPanel();
+        BuildOllamaPanel();
+        p.Children.Add(_builtinPanel);
+        p.Children.Add(_ollamaPanel);
+        _ = ScanModels();
+        return Ui.CardBox(p);
+    }
+
+    private void SetBackend(string backend)
+    {
+        S.NeuralBackend = backend;
+        _app.SaveSettings();
+        _app.Neural?.ApplySettings(userAction: true);
+        if (backend == "ollama" && _app.Neural != null) _ = _app.Neural.RefreshAsync().ContinueWith(_ => Dispatcher.UIThread.Post(Refresh));
+        Refresh();
+    }
+
+    private void BuildBuiltinPanel()
+    {
+        _engineStatus.Margin = new Thickness(0, 2, 0, 2);
+        _builtinPanel.Children.Add(_engineStatus);
+        _builtinPanel.Children.Add(_modelLabel);
+
+        _foundModels.SelectionChanged += (_, _) =>
+        {
+            if (_loading || _foundModels.SelectedIndex < 0 || _foundModels.SelectedIndex >= _found.Count) return;
+            UseModel(_found[_foundModels.SelectedIndex].Path);
+        };
+        var pick = Ui.GhostButton("Выбрать файл…");
+        pick.Click += async (_, _) => await PickModelFile();
+        var scan = Ui.GhostButton("Найти");
+        scan.Click += async (_, _) => await ScanModels();
+        var row = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+        _foundModels.Margin = new Thickness(0, 0, 8, 6);
+        pick.Margin = new Thickness(0, 0, 8, 6);
+        scan.Margin = new Thickness(0, 0, 8, 6);
+        row.Children.Add(_foundModels); row.Children.Add(pick); row.Children.Add(scan);
+        _builtinPanel.Children.Add(row);
+
+        _copyButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _copyButton.Click += async (_, _) => await CopyModel();
+        var copyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        copyRow.Children.Add(_copyButton);
+        _copyStatus.VerticalAlignment = VerticalAlignment.Center;
+        copyRow.Children.Add(_copyStatus);
+        _builtinPanel.Children.Add(copyRow);
+
+        _unloadBox.ItemsSource = UnloadChoices.Select(m => m == 0 ? "никогда" : m < 60 ? $"{m} мин" : "1 час").ToList();
+        _unloadBox.SelectedIndex = Math.Max(0, Array.IndexOf(UnloadChoices, S.NeuralUnloadMinutes));
+        _unloadBox.SelectionChanged += (_, _) =>
+        {
+            if (_loading || _unloadBox.SelectedIndex < 0) return;
+            S.NeuralUnloadMinutes = UnloadChoices[_unloadBox.SelectedIndex];
+            _app.SaveSettings();
+        };
+        _builtinPanel.Children.Add(Ui.Row("Выгружать модель из памяти", "Если долго не печатаете — память освобождается, при следующей подсказке модель загрузится снова.", _unloadBox));
+        _builtinPanel.Children.Add(BoolRow("Не использовать на батарее", "На ноутбуке без зарядки подсказки от модели отключаются, чтобы беречь батарею.",
+            S.NeuralSkipOnBattery, v => S.NeuralSkipOnBattery = v));
+
+        var where = Ui.GhostButton("Где взять модель");
+        where.HorizontalAlignment = HorizontalAlignment.Left;
+        where.Click += (_, _) => NeuralService.OpenUrl(NeuralService.ModelsPage);
+        _builtinPanel.Children.Add(Ui.Hint("Подходит любой файл модели в формате GGUF: например, уже скачанный для Cotypist или LM Studio — «Найти» покажет их. Если модели нет — скачайте файл Gemma 4 E2B (вариант Q4_K_M) и выберите его. Модель работает на вашем компьютере, текст никуда не отправляется. По-таджикски маленькие модели пишут заметно слабее, чем по-русски и по-английски."));
+        _builtinPanel.Children.Add(where);
+    }
+
+    private async Task ScanModels()
+    {
+        if (_scanning) return;
+        _scanning = true;
+        _copyStatus.Text = "Ищу модели…";
+        try
+        {
+            _found = await Task.Run(() => ModelFiles.Scan());
+            bool was = _loading; _loading = true;
+            _foundModels.ItemsSource = _found.Select(f => f.ToString()).ToList();
+            _foundModels.SelectedIndex = _found.FindIndex(f => string.Equals(f.Path, S.NeuralModelPath, StringComparison.OrdinalIgnoreCase));
+            _foundModels.PlaceholderText = _found.Count == 0 ? "Модели не найдены" : $"Найдено моделей: {_found.Count}";
+            _loading = was;
+            _copyStatus.Text = "";
+        }
+        catch (Exception e) { _copyStatus.Text = "Не удалось поискать: " + e.Message; }
+        finally { _scanning = false; Refresh(); }
+    }
+
+    private async Task PickModelFile()
+    {
+        var options = new FilePickerOpenOptions { Title = "Файл модели (.gguf)", AllowMultiple = false };
+        if (!OperatingSystem.IsMacOS())   // macOS doesn't know the .gguf type — allow any file and check the extension
+            options.FileTypeFilter = new[] { new FilePickerFileType("Модель GGUF") { Patterns = new[] { "*.gguf" } } };
+        var files = await StorageProvider.OpenFilePickerAsync(options);
+        if (files.Count == 0) return;
+        var path = files[0].TryGetLocalPath();
+        if (path == null || !path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+        {
+            _copyStatus.Text = "Это не файл модели GGUF.";
+            return;
+        }
+        UseModel(path);
+        if (!_found.Any(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase)))
+        {
+            try { _found.Insert(0, new ModelFiles.Found(path, new FileInfo(path).Length, ModelFiles.SourceOf(path))); } catch { }
+            bool was = _loading; _loading = true;
+            _foundModels.ItemsSource = _found.Select(f => f.ToString()).ToList();
+            _foundModels.SelectedIndex = 0;
+            _loading = was;
+        }
+    }
+
+    private void UseModel(string path)
+    {
+        S.NeuralModelPath = path;
+        _app.SaveSettings();
+        _app.Neural?.ApplySettings(userAction: true);
+        _copyStatus.Text = "";
+        Refresh();
+    }
+
+    private async Task CopyModel()
+    {
+        if (_copyCts != null) { _copyCts.Cancel(); return; }
+        var src = S.NeuralModelPath;
+        if (!ModelFiles.IsUsable(src)) return;
+        _copyCts = new CancellationTokenSource();
+        ((TextBlock)_copyButton.Content!).Text = "Отменить";
+        var progress = new Progress<double>(f => _copyStatus.Text = $"Копирую… {f:P0}");
+        try
+        {
+            var dest = await ModelFiles.CopyToQalamAsync(src!, progress, _copyCts.Token);
+            UseModel(dest);
+            _copyStatus.Text = "Скопировано в папку Qalam — модель останется, даже если удалить программу, из которой она взята.";
+            await ScanModels();
+        }
+        catch (OperationCanceledException) { _copyStatus.Text = "Копирование отменено."; }
+        catch (Exception e) { _copyStatus.Text = "Не удалось скопировать: " + e.Message; }
+        finally
+        {
+            _copyCts = null;
+            ((TextBlock)_copyButton.Content!).Text = "Скопировать к себе";
+        }
+    }
+
+    private void BuildOllamaPanel()
+    {
+        _neuralStatus.Margin = new Thickness(0, 2, 0, 4);
+        _ollamaPanel.Children.Add(_neuralStatus);
         _neuralModels.SelectionChanged += (_, _) =>
         {
             if (_loading || _neuralModels.SelectedIndex < 0) return;
@@ -330,16 +505,15 @@ public sealed class SettingsWindow : Window
         _pullButton.Click += async (_, _) => await PullModel();
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
         row.Children.Add(_neuralModels); row.Children.Add(_pullButton);
-        p.Children.Add(row);
+        _ollamaPanel.Children.Add(row);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 8, 0, 0) };
         _installOllama.Click += (_, _) => NeuralService.OpenUrl("https://ollama.com/download");
         var recheck = Ui.GhostButton("Проверить снова");
-        recheck.Click += async (_, _) => { if (_app.Neural != null) { await _app.Neural.RefreshAsync(); Refresh(); } };
+        recheck.Click += async (_, _) => { if (_app.Neural != null) { await _app.Neural.RefreshAsync(); _neuralSig = ""; Refresh(); } };
         buttons.Children.Add(_installOllama); buttons.Children.Add(recheck);
-        p.Children.Add(buttons);
-        p.Children.Add(Ui.Hint("Как включить: 1) установите бесплатную программу Ollama; 2) выберите модель и нажмите «Скачать модель»; 3) включите переключатель. Модель работает на вашем компьютере, текст никуда не отправляется. Маленькие модели хорошо пишут по-русски и по-английски, по-таджикски — заметно слабее."));
-        return Ui.CardBox(p);
+        _ollamaPanel.Children.Add(buttons);
+        _ollamaPanel.Children.Add(Ui.Hint("Для тех, у кого уже стоит Ollama: Qalam подключится к ней и сможет сам скачать модель."));
     }
 
     private List<string> ModelNames()
@@ -371,6 +545,53 @@ public sealed class SettingsWindow : Window
     {
         var n = _app.Neural;
         _neuralSwitch!.IsChecked = S.NeuralEnabled;
+        bool builtin = S.NeuralBackend != "ollama";
+        _btnBuiltin.IsChecked = builtin;
+        _btnOllama.IsChecked = !builtin;
+        _builtinPanel.IsVisible = builtin;
+        _ollamaPanel.IsVisible = !builtin;
+        if (builtin) RefreshBuiltin(n); else RefreshOllama(n);
+    }
+
+    private void RefreshBuiltin(NeuralService? n)
+    {
+        var path = S.NeuralModelPath;
+        bool usable = ModelFiles.IsUsable(path);
+        if (usable)
+        {
+            long size = 0; try { size = new FileInfo(path!).Length; } catch { }
+            _modelLabel.Text = $"Модель: {Path.GetFileName(path)} · {ModelFiles.Size(size)} · {ModelFiles.SourceOf(path!)}";
+        }
+        else _modelLabel.Text = string.IsNullOrEmpty(path) ? "Модель не выбрана" : $"Файл модели не найден: {path}";
+        _copyButton.IsVisible = usable && ModelFiles.SourceOf(path!) != "Qalam";
+        if (_copyCts == null && _copyButton.IsVisible && _copyStatus.Text is null or "")
+            _copyStatus.Text = "Совет: если модель взята из другой программы, скопируйте её к себе — иначе она пропадёт при удалении той программы.";
+
+        var e = n?.Engine;
+        string status; IBrush color = Ui.Muted;
+        if (!LlamaEngine.Available) status = "Встроенный движок не найден в этой сборке Qalam.";
+        else if (!S.NeuralEnabled) status = "Модуль выключен — модель не загружена и память не занимает.";
+        else if (!usable) status = "Выберите файл модели, чтобы включить подсказки.";
+        else if (S.NeuralSkipOnBattery && _app.Platform?.IsOnBattery() == true) status = "Ноутбук на батарее — подсказки от модели на паузе.";
+        else
+        {
+            switch (e?.State)
+            {
+                case LlamaEngine.EngineState.Loading: status = "Загружаю модель в память…"; break;
+                case LlamaEngine.EngineState.Ready:
+                    var mem = e!.MemoryBytes;
+                    status = mem > 0 ? $"Работает · модель в памяти (~{ModelFiles.Size(mem)})" : "Работает · модель в памяти";
+                    color = Ui.Yellow; break;
+                case LlamaEngine.EngineState.Failed: status = "Ошибка: " + e!.Error; color = Ui.Orange; break;
+                default: status = "Готово · модель загрузится при первой подсказке"; color = Ui.Yellow; break;
+            }
+        }
+        _engineStatus.Text = status;
+        _engineStatus.Foreground = color;
+    }
+
+    private void RefreshOllama(NeuralService? n)
+    {
         if (_pullCts != null) return;   // progress text in use
         var names = ModelNames();
         var sig = $"{n?.OllamaFound}|{string.Join(",", n?.InstalledModels ?? new())}|{S.NeuralModel}";

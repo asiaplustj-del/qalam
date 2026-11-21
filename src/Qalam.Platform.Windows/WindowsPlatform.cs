@@ -331,6 +331,27 @@ public sealed class WindowsPlatform : IKeyboardPlatform
         return null;
     }
 
+    public bool IsOnBattery() => GetSystemPowerStatus(out var st) && st.ACLineStatus == 0;
+
+    private static IntPtr _job;
+    /// <summary>Child processes (the model engine) die together with Qalam, even if Qalam crashes.</summary>
+    public static void KillWithQalam(System.Diagnostics.Process child)
+    {
+        try
+        {
+            if (_job == IntPtr.Zero)
+            {
+                var job = CreateJobObject(IntPtr.Zero, null);
+                var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref info, Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>());
+                _job = job;
+            }
+            AssignProcessToJobObject(_job, child.Handle);
+        }
+        catch { }
+    }
+
     public void SetStartWithSystem(bool enabled)
     {
         try

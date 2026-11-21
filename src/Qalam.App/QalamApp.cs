@@ -94,7 +94,8 @@ public sealed class QalamApp : Application
         Platform = platform;
         Controller.Corrected += c => Dispatcher.UIThread.Post(() => OnCorrected(c));
         Controller.StateChanged += () => Dispatcher.UIThread.Post(UpdateState);
-        Neural = new NeuralService(Settings);
+        Neural = new NeuralService(Settings, platform);
+        Neural.Engine.StateChanged += () => Dispatcher.UIThread.Post(() => Changed?.Invoke());
         _ = Neural.RefreshAsync().ContinueWith(_ => Dispatcher.UIThread.Post(() => Changed?.Invoke()));
         Controller.SuggestionChanged += sug => Dispatcher.UIThread.Post(() => OnSuggestion(sug));
         Controller.PhraseOpportunity += (v, text) => Neural.OnPhraseOpportunity(Controller, v, text);
@@ -251,12 +252,14 @@ public sealed class QalamApp : Application
         Settings.Save();
         Controller?.ApplySettings();
         Platform?.SetStartWithSystem(Settings.StartWithSystem);
+        Neural?.ApplySettings();
         UpdateState();
     }
 
     public void Quit()
     {
         Controller?.Dispose();
+        Neural?.Dispose();
         if (_tray != null) _tray.IsVisible = false;
         (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
     }

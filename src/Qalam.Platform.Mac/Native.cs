@@ -60,6 +60,9 @@ internal static class Native
     public static extern int UCKeyTranslate(IntPtr layout, ushort code, ushort action, uint mods, uint kbdType, uint options,
                                             ref uint deadKeyState, nuint maxLen, out nuint actualLen, [Out] char[] buf);
 
+    [DllImport("/System/Library/Frameworks/IOKit.framework/IOKit")] public static extern IntPtr IOPSCopyPowerSourcesInfo();
+    [DllImport("/System/Library/Frameworks/IOKit.framework/IOKit")] public static extern IntPtr IOPSGetProvidingPowerSourceType(IntPtr snapshot);
+
     [DllImport(AS)] public static extern bool AXIsProcessTrusted();
     [DllImport(AS)] public static extern IntPtr AXUIElementCreateSystemWide();
     [DllImport(AS)] public static extern IntPtr AXUIElementCreateApplication(int pid);

@@ -8,11 +8,15 @@ using Qalam.Core;
 namespace Qalam.App;
 
 /// <summary>
-/// Optional module: continues the phrase with a local language model served by Ollama
-/// (https://ollama.com). Nothing leaves the computer. Off by default.
+/// Optional module: continues the phrase with a local language model — either the built-in
+/// llama.cpp engine with a GGUF file, or an external Ollama server. Nothing leaves the computer.
+/// Off by default.
 /// </summary>
-public sealed class NeuralService
+public sealed class NeuralService : IDisposable
 {
+    /// <summary>Where to get a model when the computer has none.</summary>
+    public const string ModelsPage = "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF";
+
     public sealed record ModelInfo(string Name, string Description);
 
     public static readonly ModelInfo[] Recommended =
@@ -31,7 +35,31 @@ public sealed class NeuralService
     public List<string> InstalledModels { get; private set; } = new();
     public string? LastError { get; private set; }
 
-    public NeuralService(QalamSettings settings) => _s = settings;
+    private readonly IKeyboardPlatform? _platform;
+
+    /// <summary>The built-in engine (llama.cpp's llama-server as a child process).</summary>
+    public LlamaEngine Engine { get; } = new();
+    public bool UseBuiltin => _s.NeuralBackend != "ollama";
+
+    public NeuralService(QalamSettings settings, IKeyboardPlatform? platform = null)
+    {
+        _s = settings;
+        _platform = platform;
+        Engine.UnloadAfterMinutes = settings.NeuralUnloadMinutes;
+        if (OperatingSystem.IsWindows())
+            Engine.OnProcessStarted = p => Qalam.Platform.Windows.WindowsPlatform.KillWithQalam(p);
+    }
+
+    /// <summary>Apply changed settings. <paramref name="userAction"/>: the user just switched the module
+    /// on or picked a model — load it right away so the first suggestion is quick.</summary>
+    public void ApplySettings(bool userAction = false)
+    {
+        Engine.UnloadAfterMinutes = _s.NeuralUnloadMinutes;
+        if (!_s.NeuralEnabled || !UseBuiltin) { if (Engine.State != LlamaEngine.EngineState.Stopped) Engine.Stop(); return; }
+        if (userAction && ModelFiles.IsUsable(_s.NeuralModelPath)) Engine.Preload(_s.NeuralModelPath!);
+    }
+
+    public void Dispose() => Engine.Dispose();
 
     private string Url(string path) => _s.NeuralUrl.TrimEnd('/') + path;
 
@@ -79,6 +107,8 @@ public sealed class NeuralService
     public void OnPhraseOpportunity(QalamController controller, long version, string fieldText)
     {
         if (!_s.NeuralEnabled) return;
+        if (UseBuiltin && !ModelFiles.IsUsable(_s.NeuralModelPath)) return;
+        if (_s.NeuralSkipOnBattery && _platform?.IsOnBattery() == true) return;
         _cts?.Cancel();
         var cts = _cts = new CancellationTokenSource();
         var context = fieldText.Length > 800 ? fieldText[^800..] : fieldText;
@@ -97,6 +127,11 @@ public sealed class NeuralService
 
     public async Task<string?> CompleteAsync(string context, CancellationToken ct)
     {
+        if (UseBuiltin)
+        {
+            var raw = await Engine.CompleteAsync(_s.NeuralModelPath!, context, 14, ct);
+            return Clean(raw, context.EndsWith(' '));
+        }
         var body = new
         {
             model = _s.NeuralModel,

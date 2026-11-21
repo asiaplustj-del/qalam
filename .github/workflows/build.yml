@@ -13,6 +13,9 @@ permissions:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # llama.cpp build bundled as the built-in model engine (llama-server)
+  LLAMA_TAG: b11669
+  LLAMA_URL: https://github.com/ggml-org/llama.cpp/releases/download
 
 jobs:
   test:
@@ -24,6 +27,14 @@ jobs:
       - name: Engine simulation
         working-directory: tests/Qalam.Sim
         run: dotnet run -c Release
+      - name: Built-in model engine (llama-server + tiny model)
+        run: |
+          curl -sSL -o /tmp/llama.tar.gz "$LLAMA_URL/$LLAMA_TAG/llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+          mkdir -p /tmp/llama && tar -xzf /tmp/llama.tar.gz -C /tmp/llama
+          SERVER=$(find /tmp/llama -name llama-server -type f | head -1)
+          pip install -q gguf numpy
+          python3 tests/Qalam.EngineTest/make_tiny.py /tmp/tiny.gguf
+          cd tests/Qalam.EngineTest && QALAM_LLAMA_SERVER="$SERVER" dotnet run -c Release -- /tmp/tiny.gguf
 
   windows:
     runs-on: windows-latest
@@ -40,6 +51,23 @@ jobs:
           echo "QALAM_VERSION=$V" >> $GITHUB_ENV
       - name: Publish
         run: dotnet publish src/Qalam.App/Qalam.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=${{ env.QALAM_VERSION }} -o out/win-x64
+      - name: Bundle model engine (llama.cpp)
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\llama.zip"
+          Invoke-WebRequest "$env:LLAMA_URL/$env:LLAMA_TAG/llama-$env:LLAMA_TAG-bin-win-cpu-x64.zip" -OutFile $zip
+          $tmp = "$env:RUNNER_TEMP\llama"
+          Expand-Archive $zip -DestinationPath $tmp -Force
+          $server = Get-ChildItem $tmp -Recurse -Filter llama-server.exe | Select-Object -First 1
+          if (-not $server) { throw "llama-server.exe not found in the llama.cpp archive" }
+          $dest = "out/win-x64/llama"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item $server.FullName $dest
+          Get-ChildItem $server.DirectoryName -Filter *.dll | Copy-Item -Destination $dest
+          Get-ChildItem $server.DirectoryName -Filter LICENSE* | Copy-Item -Destination $dest
+          & "$dest/llama-server.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "llama-server does not start" }
+          Get-ChildItem $dest | Measure-Object -Property Length -Sum | ForEach-Object { "engine size: {0:N1} MB" -f ($_.Sum / 1MB) }
       - name: Installer
         shell: pwsh
         run: |
@@ -71,6 +99,22 @@ jobs:
           echo "QALAM_VERSION=$V" >> $GITHUB_ENV
       - name: Publish
         run: dotnet publish src/Qalam.App/Qalam.App.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:Version=$QALAM_VERSION -o out/${{ matrix.rid }}
+      - name: Bundle model engine (llama.cpp)
+        run: |
+          LARCH=$([ "${{ matrix.rid }}" = "osx-arm64" ] && echo "arm64" || echo "x64")
+          curl -sSL -o /tmp/llama.tar.gz "$LLAMA_URL/$LLAMA_TAG/llama-$LLAMA_TAG-bin-macos-$LARCH.tar.gz"
+          mkdir -p /tmp/llama && tar -xzf /tmp/llama.tar.gz -C /tmp/llama
+          SERVER=$(find /tmp/llama -name llama-server -type f | head -1)
+          [ -n "$SERVER" ] || { echo "llama-server not found in archive"; exit 1; }
+          SRC=$(dirname "$SERVER")
+          DEST=out/${{ matrix.rid }}/llama
+          mkdir -p "$DEST"
+          cp -a "$SERVER" "$DEST/"
+          cp -a "$SRC"/*.dylib "$DEST/" 2>/dev/null || true
+          cp -a "$SRC"/LICENSE* "$DEST/" 2>/dev/null || true
+          chmod +x "$DEST/llama-server"
+          if [ "$LARCH" = "arm64" ]; then "$DEST/llama-server" --version; fi
+          du -sh "$DEST"
       - name: App bundle + DMG
         run: |
           ARCH=$([ "${{ matrix.rid }}" = "osx-arm64" ] && echo "AppleSilicon" || echo "Intel")
@@ -80,7 +124,10 @@ jobs:
           sed "s/__VERSION__/$QALAM_VERSION/g" packaging/macos/Info.plist > $APP/Contents/Info.plist
           cp packaging/macos/qalam.icns $APP/Contents/Resources/
           chmod +x $APP/Contents/MacOS/Qalam
+          # sign the engine's binaries one by one, then the whole app (ad-hoc)
+          find "$APP/Contents/MacOS/llama" -type f \( -name "*.dylib" -o -name "llama-server" \) -print0 | xargs -0 -n1 codesign --force --sign -
           codesign --force --deep --sign - $APP
+          codesign --verify --deep --strict $APP && echo "signature OK" || echo "::warning::codesign verify reported a problem"
           mkdir -p out/dmg && cp -R $APP out/dmg/ && ln -s /Applications out/dmg/Applications
           hdiutil create -volname Qalam -srcfolder out/dmg -ov -format UDZO "out/Qalam-$QALAM_VERSION-macOS-$ARCH.dmg"
       - uses: actions/upload-artifact@v4
