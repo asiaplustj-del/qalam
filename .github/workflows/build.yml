@@ -147,7 +147,8 @@ jobs:
           find "$APP/Contents/MacOS/llama" -type f \( -name "*.dylib" -o -name "llama-server" \) -print0 | xargs -0 -n1 codesign --force --timestamp=none --sign "$SIGN"
           codesign --force --deep --timestamp=none --sign "$SIGN" $APP
           codesign --verify --deep --strict $APP && echo "signature OK" || echo "::warning::codesign verify reported a problem"
-          echo "designated requirement:"; codesign -d -r- $APP 2>&1 | tail -2
+          DR=$(codesign -d -r- $APP 2>&1 | grep designated | head -1)
+          echo "::notice::${{ matrix.rid }} signed with ${SIGN:0:12}… — $DR"
           mkdir -p out/dmg && cp -R $APP out/dmg/ && ln -s /Applications out/dmg/Applications
           hdiutil create -volname Qalam -srcfolder out/dmg -ov -format UDZO "out/Qalam-$QALAM_VERSION-macOS-$ARCH.dmg"
       - uses: actions/upload-artifact@v4
