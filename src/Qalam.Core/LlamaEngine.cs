@@ -81,21 +81,40 @@ public sealed class LlamaEngine : IDisposable
         }
         try
         {
-            var body = new
+            // Chat models (Gemma, Qwen…) answer a request better than they continue raw text:
+            // ask for the continuation through the model's own chat template.
+            var chat = new
             {
-                prompt,
-                n_predict = maxTokens,
+                messages = new object[]
+                {
+                    new { role = "system", content = Instruction },
+                    new { role = "user", content = prompt },
+                },
+                max_tokens = maxTokens,
                 temperature = 0.2,
                 top_k = 40,
                 top_p = 0.9,
                 stop = new[] { "\n" },
                 cache_prompt = true,
             };
-            using var resp = await _http.PostAsJsonAsync($"http://127.0.0.1:{_port}/completion", body, ct);
-            if (!resp.IsSuccessStatusCode) { Log.Info($"llama /completion HTTP {(int)resp.StatusCode}"); return null; }
-            var o = await resp.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
+            using (var resp = await _http.PostAsJsonAsync($"http://127.0.0.1:{_port}/v1/chat/completions", chat, ct))
+            {
+                if (resp.IsSuccessStatusCode)
+                {
+                    var o = await resp.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
+                    _lastUse = DateTime.UtcNow;
+                    var text = o?["choices"]?[0]?["message"]?["content"]?.GetValue<string>();
+                    if (!string.IsNullOrWhiteSpace(text)) return text;
+                }
+                else Log.Info($"llama chat HTTP {(int)resp.StatusCode}, falling back to raw completion");
+            }
+            // models without a chat template: plain continuation
+            var body = new { prompt, n_predict = maxTokens, temperature = 0.2, top_k = 40, top_p = 0.9, stop = new[] { "\n" }, cache_prompt = true };
+            using var r2 = await _http.PostAsJsonAsync($"http://127.0.0.1:{_port}/completion", body, ct);
+            if (!r2.IsSuccessStatusCode) { Log.Info($"llama /completion HTTP {(int)r2.StatusCode}"); return null; }
+            var o2 = await r2.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
             _lastUse = DateTime.UtcNow;
-            return o?["content"]?.GetValue<string>();
+            return o2?["content"]?.GetValue<string>();
         }
         catch (OperationCanceledException) { return null; }
         catch (Exception e)
@@ -104,6 +123,27 @@ public sealed class LlamaEngine : IDisposable
             Log.Error("llama completion", e);
             return null;
         }
+    }
+
+    /// <summary>What we ask the model to do (works for Russian, Tajik and English text).</summary>
+    public const string Instruction =
+        "Ты — автодополнение текста, как подсказки на клавиатуре телефона. Пользователь присылает текст, который он сейчас печатает. " +
+        "Допиши естественное продолжение последней фразы: от 2 до 6 слов, на том же языке и в том же стиле. " +
+        "Если последнее слово не допечатано — начни с его окончания. " +
+        "Выведи ТОЛЬКО само продолжение: без кавычек, пояснений, приветствий и без повторения уже написанного текста.";
+
+    /// <summary>Waits (up to <paramref name="timeout"/>) until the model is loaded. For the "check" button.</summary>
+    public async Task<bool> WaitReadyAsync(string modelPath, TimeSpan timeout)
+    {
+        Preload(modelPath);
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
+        {
+            if (State == EngineState.Ready && LoadedModel == modelPath) return true;
+            if (State == EngineState.Failed) return false;
+            await Task.Delay(250);
+        }
+        return false;
     }
 
     private async Task EnsureStartedAsync(string modelPath)
@@ -131,7 +171,7 @@ public sealed class LlamaEngine : IDisposable
                 WorkingDirectory = Path.GetDirectoryName(server)!,
             };
             foreach (var a in new[] { "-m", modelPath, "--host", "127.0.0.1", "--port", _port.ToString(),
-                                      "-c", ContextSize.ToString(), "-np", "1", "--no-webui" })
+                                      "-c", ContextSize.ToString(), "-np", "1", "--no-webui", "--reasoning-budget", "0" })
                 psi.ArgumentList.Add(a);
             if (OperatingSystem.IsWindows())
             {   // CPU build: leave half of the cores to the user's apps

@@ -288,6 +288,8 @@ public sealed class SettingsWindow : Window
         p.Children.Add(Ui.Caption("Подсказки и таджикские буквы"));
         p.Children.Add(BoolRow("Дописывать слова", "Под курсором появляется подсказка: «точик» → «тоҷикистон». Tab — принять, просто печатайте дальше — игнорировать. Работает по словарю, без интернета и нейросети.",
             S.WordCompletion, v => S.WordCompletion = v));
+        p.Children.Add(BoolRow("Подсказка над строкой", "Иначе — под строкой. На Mac снизу показывает свои подсказки сама система, поэтому по умолчанию — сверху.",
+            S.SuggestionAbove, v => S.SuggestionAbove = v));
         p.Children.Add(BoolRow("Восстанавливать таджикские буквы", "«хамчун» → «ҳамчун», «чахон» → «ҷаҳон», «точикистон» → «тоҷикистон». Слова, которые и так правильные («ки», «кор»), не трогаются. Отменить — той же клавишей, что и исправление.",
             S.RestoreTajik, v => S.RestoreTajik = v));
         return Ui.CardBox(p);
@@ -407,11 +409,42 @@ public sealed class SettingsWindow : Window
         _builtinPanel.Children.Add(BoolRow("Не использовать на батарее", "На ноутбуке без зарядки подсказки от модели отключаются, чтобы беречь батарею.",
             S.NeuralSkipOnBattery, v => S.NeuralSkipOnBattery = v));
 
+        var test = Ui.GhostButton("Проверить подсказку");
+        test.HorizontalAlignment = HorizontalAlignment.Left;
+        test.Click += async (_, _) => await TestModel();
+        _builtinPanel.Children.Add(test);
+        _testResult.Margin = new Thickness(0, 2, 0, 6);
+        _builtinPanel.Children.Add(_testResult);
+
         var where = Ui.GhostButton("Где взять модель");
         where.HorizontalAlignment = HorizontalAlignment.Left;
         where.Click += (_, _) => NeuralService.OpenUrl(NeuralService.ModelsPage);
         _builtinPanel.Children.Add(Ui.Hint("Подходит любой файл модели в формате GGUF: например, уже скачанный для Cotypist или LM Studio — «Найти» покажет их. Если модели нет — скачайте файл Gemma 4 E2B (вариант Q4_K_M) и выберите его. Модель работает на вашем компьютере, текст никуда не отправляется. По-таджикски маленькие модели пишут заметно слабее, чем по-русски и по-английски."));
         _builtinPanel.Children.Add(where);
+    }
+
+    private readonly TextBlock _testResult = new() { FontSize = 13, Foreground = Ui.Muted, TextWrapping = TextWrapping.Wrap, FontFamily = Ui.Mono };
+
+    /// <summary>Runs one real request so the user sees what the model answers and how fast.</summary>
+    private async Task TestModel()
+    {
+        var n = _app.Neural;
+        var path = S.NeuralModelPath;
+        if (n == null || !ModelFiles.IsUsable(path)) { _testResult.Text = "Сначала выберите файл модели."; return; }
+        _testResult.Text = "Загружаю модель…";
+        if (!await n.Engine.WaitReadyAsync(path!, TimeSpan.FromMinutes(3)))
+        {
+            _testResult.Text = "Модель не загрузилась: " + (n.Engine.Error ?? "нет ответа");
+            return;
+        }
+        var sample = "Завтра утром мы поедем на съёмки и ";
+        _testResult.Text = $"Спрашиваю: «{sample}…»";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var raw = await n.Engine.CompleteAsync(path!, sample, 16, default);
+        var clean = PhraseText.Clean(raw, sample);
+        _testResult.Text = clean != null
+            ? $"{sw.Elapsed.TotalSeconds:0.0} с · «{sample}{clean}»"
+            : $"{sw.Elapsed.TotalSeconds:0.0} с · модель ответила неподходяще: «{raw}»";
     }
 
     private async Task ScanModels()

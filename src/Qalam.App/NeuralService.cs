@@ -129,8 +129,8 @@ public sealed class NeuralService : IDisposable
     {
         if (UseBuiltin)
         {
-            var raw = await Engine.CompleteAsync(_s.NeuralModelPath!, context, 14, ct);
-            return Clean(raw, context.EndsWith(' '));
+            var raw = await Engine.CompleteAsync(_s.NeuralModelPath!, context, 16, ct);
+            return PhraseText.Clean(raw, context);
         }
         var body = new
         {
@@ -145,7 +145,7 @@ public sealed class NeuralService : IDisposable
         using var resp = await _http.PostAsJsonAsync(Url("/api/generate"), body, ct);
         if (!resp.IsSuccessStatusCode) { LastError = $"HTTP {(int)resp.StatusCode}"; return null; }
         var o = await resp.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
-        return Clean(o?["response"]?.GetValue<string>(), context.EndsWith(' '));
+        return PhraseText.Clean(o?["response"]?.GetValue<string>(), context);
     }
 
     /// <summary>Keeps the first few words / up to the end of the sentence.</summary>

@@ -193,5 +193,17 @@ Console.WriteLine("\n=== Word completion ===");
     Check("stale neural answer ignored", shown == null);
 }
 
+// ---------- model answer cleaning ----------
+Console.WriteLine("\n=== Phrase cleaning ===");
+{
+    var ctx = "Завтра утром мы поедем на съёмки и ";
+    Check("plain", PhraseText.Clean("снимем репортаж о заводе.", ctx) == "снимем репортаж о заводе.");
+    Check("quotes stripped", PhraseText.Clean("«снимем репортаж»", ctx) == "снимем репортаж");
+    Check("echo removed", PhraseText.Clean("съёмки и снимем репортаж", ctx) == "снимем репортаж");
+    Check("long cut to 7 words", PhraseText.Clean("а б в г д е ж з и к", ctx)!.Split(' ').Length == 7);
+    Check("markup rejected", PhraseText.Clean("**Конечно!** вот", ctx) == null);
+    Check("empty rejected", PhraseText.Clean("\n", ctx) == null);
+}
+
 Console.WriteLine(failures == 0 ? "\nQUALITY OK" : $"\nQUALITY FAILED ({failures})");
 return failures == 0 ? 0 : 1;

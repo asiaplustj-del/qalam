@@ -52,7 +52,9 @@ public sealed class SuggestionPopup : Window
         };
     }
 
-    public void ShowSuggestion(QalamController.Suggestion s, PixelPoint position)
+    /// <param name="caretTop">Caret top-left in physical pixels.</param>
+    /// <param name="caretHeight">Caret height in physical pixels.</param>
+    public void ShowSuggestion(QalamController.Suggestion s, PixelPoint caretTop, int caretHeight, bool above)
     {
         if (s.IsPhrase)
         {
@@ -69,7 +71,19 @@ public sealed class SuggestionPopup : Window
             _rest.Text = s.Text[n..];
             _alts.Text = s.Alternatives.Count > 0 ? string.Join(" · ", s.Alternatives) : "";
         }
-        Position = position;
+        var scaling = Screens.ScreenFromPoint(caretTop)?.Scaling ?? 1.0;
+        Measure(Size.Infinity);
+        int heightPx = (int)Math.Ceiling(DesiredSize.Height * scaling);
+        int gap = (int)(6 * scaling);
+        int y = above ? caretTop.Y - heightPx - gap : caretTop.Y + caretHeight + gap;
+        // keep it on screen: flip to the other side if there is no room
+        var area = Screens.ScreenFromPoint(caretTop)?.WorkingArea;
+        if (area is { } a)
+        {
+            if (y < a.Y) y = caretTop.Y + caretHeight + gap;
+            if (y + heightPx > a.Bottom) y = caretTop.Y - heightPx - gap;
+        }
+        Position = new PixelPoint(caretTop.X, y);
         if (!IsVisible) Show();
     }
 }

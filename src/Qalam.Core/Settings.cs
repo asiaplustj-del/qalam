@@ -62,6 +62,8 @@ public sealed class QalamSettings
     public bool RestoreTajik { get; set; } = true;
     /// <summary>Dictionary word completion, accepted with Tab.</summary>
     public bool WordCompletion { get; set; } = true;
+    /// <summary>Show the suggestion above the text line (macOS shows its own predictions below it).</summary>
+    public bool SuggestionAbove { get; set; } = OperatingSystem.IsMacOS();
 
     // ---- optional neural module (local model via Ollama) ----
     public bool NeuralEnabled { get; set; }

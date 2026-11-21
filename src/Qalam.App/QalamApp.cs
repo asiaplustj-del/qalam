@@ -140,7 +140,7 @@ public sealed class QalamApp : Application
                 if (Controller?.CurrentSuggestion != sug) return;
                 if (caret is not { } c) { _popup.Hide(); return; }
                 double scale = OperatingSystem.IsMacOS() ? (_popup.Screens.Primary?.Scaling ?? 1) : 1;  // macOS reports points
-                _popup.ShowSuggestion(sug, new PixelPoint((int)(c.X * scale), (int)((c.Y + c.H + 4) * scale)));
+                _popup.ShowSuggestion(sug, new PixelPoint((int)(c.X * scale), (int)(c.Y * scale)), (int)(c.H * scale), Settings.SuggestionAbove);
             });
         });
     }
