@@ -1,0 +1,30 @@
+{
+ "tg": {
+  "tokens": 60000091,
+  "written": true,
+  "words": 22000,
+  "sources": [
+   "HuggingFaceFW/fineweb-2/data/tgk_Cyrl/train: 60,000,091 tokens in 112s"
+  ]
+ },
+ "ru": {
+  "tokens": 26035627,
+  "written": true,
+  "words": 22000,
+  "sources": [
+   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/ru.txt.gz: 26,035,627 tokens in 39s",
+   "rus_news_2023_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')",
+   "rus-ru_web-public_2019_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')"
+  ]
+ },
+ "en": {
+  "tokens": 32206049,
+  "written": true,
+  "words": 18000,
+  "sources": [
+   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/en.txt.gz: 32,206,049 tokens in 34s",
+   "eng_news_2023_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')",
+   "eng-com_web-public_2018_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')"
+  ]
+ }
+}
