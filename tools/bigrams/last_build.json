@@ -4,27 +4,26 @@
   "written": true,
   "words": 22000,
   "sources": [
-   "HuggingFaceFW/fineweb-2/data/tgk_Cyrl/train: 60,000,091 tokens in 112s"
+   "HuggingFaceFW/fineweb-2/data/tgk_Cyrl/train: 60,000,091 tokens in 497s"
   ]
  },
  "ru": {
-  "tokens": 26035627,
+  "tokens": 45000006,
   "written": true,
   "words": 22000,
   "sources": [
-   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/ru.txt.gz: 26,035,627 tokens in 39s",
-   "rus_news_2023_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')",
-   "rus-ru_web-public_2019_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')"
+   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/ru.txt.gz: 26,035,627 tokens in 50s",
+   "rus_news_2023_1M: 13,243,454 tokens in 40s",
+   "rus-ru_web-public_2019_1M: 5,720,925 tokens in 58s"
   ]
  },
  "en": {
-  "tokens": 32206049,
+  "tokens": 45000001,
   "written": true,
   "words": 18000,
   "sources": [
-   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/en.txt.gz: 32,206,049 tokens in 34s",
-   "eng_news_2023_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')",
-   "eng-com_web-public_2018_1M: FAILED after 0 tokens ('_Stream' object has no attribute 'seekable')"
+   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/en.txt.gz: 32,206,049 tokens in 43s",
+   "eng_news_2023_1M: 12,793,952 tokens in 43s"
   ]
  }
 }
