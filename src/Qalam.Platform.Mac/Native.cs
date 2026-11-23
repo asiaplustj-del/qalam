@@ -80,6 +80,7 @@ internal static class Native
     [DllImport(AS)] public static extern int AXUIElementSetMessagingTimeout(IntPtr element, float seconds);
     [DllImport(ObjC, EntryPoint = "objc_msgSend")] public static extern int objc_msgSend_int(IntPtr target, IntPtr selector);
     [DllImport(AS)] public static extern int AXUIElementCopyAttributeValue(IntPtr element, IntPtr attribute, out IntPtr value);
+    [DllImport(AS)] public static extern int AXUIElementSetAttributeValue(IntPtr element, IntPtr attribute, IntPtr value);
     [DllImport(AS)] public static extern int AXUIElementCopyParameterizedAttributeValue(IntPtr element, IntPtr attribute, IntPtr parameter, out IntPtr value);
     [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CGRect rect);
     [DllImport(AS)] public static extern bool AXValueGetValue(IntPtr value, int type, out CFRange range);
@@ -104,6 +105,7 @@ internal static class Native
         return Marshal.ReadIntPtr(NativeLibrary.GetExport(h, name));
     }
     public static readonly IntPtr CommonModes = Sym(CF, "kCFRunLoopCommonModes");
+    public static readonly IntPtr kCFBooleanTrue = Sym(CF, "kCFBooleanTrue");
     public static readonly IntPtr kTISPropertyInputSourceCategory = Sym(Carbon, "kTISPropertyInputSourceCategory");
     public static readonly IntPtr kTISPropertyInputSourceIsSelectCapable = Sym(Carbon, "kTISPropertyInputSourceIsSelectCapable");
     public static readonly IntPtr kTISPropertyUnicodeKeyLayoutData = Sym(Carbon, "kTISPropertyUnicodeKeyLayoutData");

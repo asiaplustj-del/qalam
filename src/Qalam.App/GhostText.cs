@@ -8,7 +8,7 @@ using Qalam.Core;
 namespace Qalam.App;
 
 /// <summary>
-/// Cotypist-style suggestion: semi-transparent text drawn right after the text cursor, on the same line,
+/// Inline suggestion: semi-transparent text drawn right after the text cursor, on the same line,
 /// in the field's own font (family, size, weight as the app's accessibility API reports them), no background.
 /// A transparent, borderless, never-focused window placed exactly over the caret.
 /// </summary>
@@ -50,7 +50,7 @@ public sealed class GhostText : Window
         // any late resize (layout pass, the OS) → put the window back exactly where it belongs
         PropertyChanged += (_, e) =>
         {
-            if (e.Property == ClientSizeProperty && _target is { } t && IsVisible) Position = t;
+            if (e.Property == ClientSizeProperty && _target is { } t && IsVisible) { Position = t; ApplyMacFrame(); }
         };
     }
 
@@ -100,16 +100,26 @@ public sealed class GhostText : Window
         _target = target;
         Position = target;
         if (!IsVisible) Show();
-        // the native window may apply the new size a moment later — move it again after that
-        Dispatcher.UIThread.Post(() => { if (_target == target && IsVisible) Position = target; }, DispatcherPriority.Render);
+        // macOS: set the native frame directly (Avalonia moved the window with a stale height → a line too high)
+        double prim = Screens.Primary?.Scaling ?? scaling;
+        _macFrame = OperatingSystem.IsMacOS() ? (target.X / prim, target.Y / prim, Width, h) : null;
+        ApplyMacFrame();
+        // the native window may apply the new size a moment later — place it again after that
+        Dispatcher.UIThread.Post(() => { if (_target == target && IsVisible) { Position = target; ApplyMacFrame(); } }, DispatcherPriority.Render);
         LastPlacement = $"caret=({caretTop.X},{caretTop.Y},h{caretHeight}) font={font?.Family ?? "?"} {fontSizePx:F0}px w{font?.Weight} → " +
-                        $"text {_text.FontFamily.Name} {_text.FontSize}dip, window {target.X},{target.Y} {Width:F0}x{h:F0}dip @{scaling}";
+                        $"text {_text.FontFamily.Name} {_text.FontSize}dip, window {target.X},{target.Y} {Width:F0}x{h:F0}dip @{scaling}{(_macFrame != null ? " (native frame)" : "")}";
+    }
+
+    private (double X, double Y, double W, double H)? _macFrame;
+    private void ApplyMacFrame()
+    {
+        if (_macFrame is { } f && !MacWindowFrame.Place(this, f.X, f.Y, f.W, f.H)) _macFrame = null;
     }
 
     /// <summary>Last position decision (for the diagnostic log).</summary>
     public string LastPlacement { get; private set; } = "";
 
-    public override void Hide() { _target = null; base.Hide(); }
+    public override void Hide() { _target = null; _macFrame = null; base.Hide(); }
 
     private static readonly Dictionary<string, FontFamily> _families = new(StringComparer.OrdinalIgnoreCase);
 

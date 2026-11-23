@@ -356,6 +356,23 @@ public sealed class MacPlatform : IKeyboardPlatform
     private static readonly IntPtr AXPositionAttr = CFStr("AXPosition");
     private static readonly IntPtr AXSizeAttr = CFStr("AXSize");
 
+    private static readonly IntPtr AXManualAccessibility = CFStr("AXManualAccessibility");
+    private readonly HashSet<int> _axEnabled = new();
+
+    /// <summary>Last caret lookup in detail (for the diagnostic log).</summary>
+    public string LastCaretInfo { get; private set; } = "";
+
+    /// <summary>
+    /// Electron apps (Claude, Slack, VS Code, Discord…) build their accessibility tree only when asked:
+    /// AXManualAccessibility = true on the app. Without it there is no caret → no inline hint.
+    /// </summary>
+    private void EnableAppAccessibility(IntPtr app, int pid)
+    {
+        lock (_axEnabled) if (!_axEnabled.Add(pid)) return;
+        int err = AXUIElementSetAttributeValue(app, AXManualAccessibility, kCFBooleanTrue);
+        Qalam.Core.Log.Info($"AXManualAccessibility for {ForegroundApp()} (pid {pid}): {(err == 0 ? "on" : "error " + err)}");
+    }
+
     /// <summary>Caret rectangle in POINTS (macOS global coordinates, top-left origin).</summary>
     public (int X, int Y, int W, int H)? GetCaretRect()
     {
@@ -367,24 +384,47 @@ public sealed class MacPlatform : IKeyboardPlatform
             if (pid <= 0 || pid == Environment.ProcessId) return null;
             sys = AXUIElementCreateApplication(pid);
             AXUIElementSetMessagingTimeout(sys, 0.25f);   // slow apps (Chrome/Electron) must not stall us
-            if (AXUIElementCopyAttributeValue(sys, AXFocused, out focused) != 0 || focused == IntPtr.Zero) return null;
+            if (AXUIElementCopyAttributeValue(sys, AXFocused, out focused) != 0 || focused == IntPtr.Zero)
+            {
+                EnableAppAccessibility(sys, pid);
+                return null;
+            }
             AXUIElementSetMessagingTimeout(focused, 0.25f);
-            if (AXUIElementCopyAttributeValue(focused, AXSelRange, out rangeVal) != 0 || rangeVal == IntPtr.Zero) return null;
+            if (AXUIElementCopyAttributeValue(focused, AXSelRange, out rangeVal) != 0 || rangeVal == IntPtr.Zero)
+            {
+                EnableAppAccessibility(sys, pid);
+                return null;
+            }
+            AXValueGetValue(rangeVal, kAXValueCFRangeType, out CFRange range);
+
+            // the caret itself (empty range)…
+            CGRect? caret = null;
             if (AXUIElementCopyParameterizedAttributeValue(focused, AXBoundsForRange, rangeVal, out bounds) == 0
                 && bounds != IntPtr.Zero && AXValueGetValue(bounds, kAXValueCGRectType, out CGRect r) && r.H > 0)
-                return ((int)r.X, (int)r.Y, Math.Max((int)r.W, 1), (int)r.H);
-            // empty selection: some apps only give bounds for a real character → take the previous one
-            if (AXValueGetValue(rangeVal, kAXValueCFRangeType, out CFRange range) && range.location > 0)
+                caret = r;
+            if (bounds != IntPtr.Zero) { CFRelease(bounds); bounds = IntPtr.Zero; }
+
+            // …and the character before it. Many apps answer the empty range with the line ABOVE (or nothing),
+            // while the last typed letter is always on the caret's own line.
+            CGRect? prevChar = null;
+            if (range.location > 0)
             {
                 var prev = new CFRange { location = range.location - 1, length = 1 };
                 var pv = AXValueCreate(kAXValueCFRangeType, ref prev);
-                if (bounds != IntPtr.Zero) { CFRelease(bounds); bounds = IntPtr.Zero; }
-                CGRect r2 = default;
-                bool ok = AXUIElementCopyParameterizedAttributeValue(focused, AXBoundsForRange, pv, out bounds) == 0
-                          && bounds != IntPtr.Zero && AXValueGetValue(bounds, kAXValueCGRectType, out r2) && r2.H > 0;
+                if (AXUIElementCopyParameterizedAttributeValue(focused, AXBoundsForRange, pv, out bounds) == 0
+                    && bounds != IntPtr.Zero && AXValueGetValue(bounds, kAXValueCGRectType, out CGRect r2) && r2.H > 0 && r2.W < 400)
+                    prevChar = r2;
                 CFRelease(pv);
-                if (ok) return ((int)(r2.X + r2.W), (int)r2.Y, 1, (int)r2.H);
             }
+            LastCaretInfo = $"caret={Fmt(caret)} prevChar={Fmt(prevChar)}";
+
+            // after a line break the previous character is on the line above, the caret below it → trust the caret
+            if (prevChar is { } pc && caret is { } c0 && c0.Y >= pc.Y + pc.H * 0.6)
+                return ((int)c0.X, (int)c0.Y, Math.Max((int)c0.W, 1), (int)c0.H);
+            if (prevChar is { } p2)
+                return ((int)Math.Round(p2.X + p2.W), (int)Math.Round(p2.Y), 1, (int)Math.Round(p2.H));
+            if (caret is { } c1)
+                return ((int)c1.X, (int)c1.Y, Math.Max((int)c1.W, 1), (int)c1.H);
             return null;
         }
         catch { return null; }
@@ -396,6 +436,8 @@ public sealed class MacPlatform : IKeyboardPlatform
             if (sys != IntPtr.Zero) CFRelease(sys);
         }
     }
+
+    private static string Fmt(CGRect? r) => r is { } v ? $"({v.X:F0},{v.Y:F0} {v.W:F0}x{v.H:F0})" : "-";
 
     private static readonly IntPtr AXAttributedStringForRange = CFStr("AXAttributedStringForRange");
     private static readonly IntPtr AXFontAttr = CFStr("AXFont");

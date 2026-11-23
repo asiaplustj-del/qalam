@@ -213,8 +213,13 @@ public sealed class QalamApp : Application
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (CaretFont? Font, int CaretH, DateTime At)> _fontCache = new();
     private readonly Dictionary<string, DateTime> _placementLogged = new();
 
+    /// <summary>Hides the hint on screen (the suggestion itself stays: the next keystroke shows it again).</summary>
+    public void HideSuggestion() { _ghost?.Hide(); _popup?.Hide(); }
+
     private void Show(QalamController.Suggestion sug, PixelPoint top, int h, bool exact, CaretFont? font = null, double fontPx = 0)
     {
+        // inline mode never shows the box: where the exact caret is unknown, there is simply no hint
+        if (Settings.InlineSuggestions && !exact) { _ghost!.Hide(); _popup!.Hide(); return; }
         if (Settings.InlineSuggestions && exact)
         {
             _popup!.Hide();
@@ -224,7 +229,8 @@ public sealed class QalamApp : Application
             if (!_placementLogged.TryGetValue(app, out var at) || DateTime.UtcNow - at > TimeSpan.FromMinutes(5))
             {
                 _placementLogged[app] = DateTime.UtcNow;
-                Log.Info($"inline hint in {app}: {_ghost.LastPlacement}");
+                var axInfo = OperatingSystem.IsMacOS() ? " | " + (Platform as Qalam.Platform.Mac.MacPlatform)?.LastCaretInfo : "";
+                Log.Info($"inline hint in {app}: {_ghost.LastPlacement}{axInfo}");
             }
         }
         else { _ghost!.Hide(); _popup!.ShowSuggestion(sug, top, h, exact && Settings.SuggestionAbove); }

@@ -113,6 +113,11 @@ public sealed class QalamController : IDisposable
         {
             var (accept, rest) = Settings.TabAcceptsWord ? PhraseText.FirstChunk(sug.Insert) : (sug.Insert, "");
             if (accept.Length == 0) (accept, rest) = (sug.Insert, "");
+            // a finished word (or mark) is followed by a space, so the caret stands ready for the next word:
+            // "фил" + Tab → "фильм |"; before a comma or other mark of the rest — no space ("фильм|, который")
+            if (rest.Length > 0 && char.IsWhiteSpace(rest[0])) { accept += " "; rest = rest.TrimStart(); }
+            else if (rest.Trim().Length == 0 && accept.Length > 0 && (char.IsLetterOrDigit(accept[^1]) || accept[^1] is ',' or '.' or '!' or '?' or ';' or ':' or '…'))
+                accept += " ";
             _platform.Replace(sug.Erase, accept);
             Engine.AcceptCompletion(accept);
             _modelWord = null;
@@ -123,7 +128,11 @@ public sealed class QalamController : IDisposable
                 _remainder = true;
                 SetSuggestion(new Suggestion(rest, 0, rest, true, Array.Empty<string>(), _version));
             }
-            else { _remainder = false; ClearSuggestion(); }
+            else
+            {
+                _remainder = false;
+                if (accept.EndsWith(' ')) ShowLearnedNextWord(); else ClearSuggestion();
+            }
             // the model continues from the new text: the phrase keeps growing as you accept it
             if (Settings.NeuralEnabled && !_excludedCache) PhraseOpportunity?.Invoke(new PhraseRequest(_version, Engine.FieldText, false, true));
             return true;
@@ -231,15 +240,39 @@ public sealed class QalamController : IDisposable
             }
             var typed = Engine.CurrentWordText;
             var before = Engine.FieldText[..^typed.Length];
-            var full = PhraseText.CompleteWord(text, typed, before, IsWord, Math.Max(2, Settings.PhraseMaxWords - 1));
+            // "фил" is a word (a rare name), but "фильм" is far more likely: the model's ", который я люблю."
+            // then continues the finished "фильм", not the name
+            var lowerTyped = typed.ToLowerInvariant();
+            var best = Completer.Complete(typed, Engine.CurrentLayout, Engine.ContextLanguage, 1, Engine.PreviousWord).FirstOrDefault();
+            bool typedIsWeak = best != null && WordZipf(best.Word.ToLowerInvariant()) - WordZipf(lowerTyped) >= 1.0;
+            Func<string, bool> isWord = w => !(typedIsWeak && w == lowerTyped) && IsWord(w);
+            int more = Math.Max(2, Settings.PhraseMaxWords - 1);
+            var full = PhraseText.CompleteWord(text, typed, before, isWord, more);
+            // the model treated the unfinished word as finished → finish it from the dictionary, keep the continuation
+            if (full == null && best != null)
+            {
+                var viaDict = PhraseText.CompleteWord(text, best.Word, before, IsWord, more);
+                if (viaDict != null && viaDict.Length > best.Word.Length) full = viaDict;
+            }
             if (full == null) return;
             _modelWord = (before, full);
             UpdateWordSuggestion();
         }
     }
 
+    private double WordZipf(string lower)
+    {
+        var langs = Engine.ContextLanguage is { } c ? new[] { c } : new[] { "ru", "tg", "en" };
+        double best = 0;
+        foreach (var l in langs) if (Engine.Detector.Model(l)?.Frequency(lower) is { } z) best = Math.Max(best, z);
+        return best;
+    }
+
+    /// <summary>A real word — in the language of the text around it when that is known ("фил" is Tajik, not Russian).</summary>
     private bool IsWord(string lower)
     {
+        if (Engine.ContextLanguage is { } ctx && Engine.Detector.Model(ctx) is { } cm)
+            return cm.Frequency(lower) != null || (ctx != "tg" && Engine.Speller?.IsRealWord(lower) == true);
         foreach (var lang in new[] { "ru", "tg", "en" })
             if (Engine.Detector.Model(lang)?.Frequency(lower) != null) return true;
         return Engine.Speller?.IsRealWord(lower) == true;
