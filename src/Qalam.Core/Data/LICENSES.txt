@@ -17,3 +17,10 @@ hun_en.aff.gz, hun_en.dic.gz
   English Hunspell dictionary en_US derived from SCOWL (http://wordlist.aspell.net),
   Copyright Kevin Atkinson and others; permissive SCOWL license
   (LibreOffice dictionaries, https://github.com/LibreOffice/dictionaries). Used unmodified.
+
+bigram_ru.txt.gz, bigram_en.txt.gz, bigram_tg.txt.gz
+  Word pair statistics (which word usually follows which), computed by tools/bigrams/build.py from:
+  OpenSubtitles 2018 monolingual data (OPUS, http://opus.nlpl.eu; P. Lison and J. Tiedemann, 2016),
+  Leipzig Corpora Collection (https://wortschatz.uni-leipzig.de, CC BY 4.0),
+  FineWeb-2 (HuggingFaceFW, ODC-By 1.0) and Wikipedia (CC BY-SA 4.0).
+  Only counts of word pairs are kept, no text. tools/bigrams/last_build.json lists what each build used.

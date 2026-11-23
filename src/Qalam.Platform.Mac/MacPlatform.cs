@@ -397,6 +397,58 @@ public sealed class MacPlatform : IKeyboardPlatform
         }
     }
 
+    private static readonly IntPtr AXAttributedStringForRange = CFStr("AXAttributedStringForRange");
+    private static readonly IntPtr AXFontAttr = CFStr("AXFont");
+    private static readonly IntPtr AXFontNameKey = CFStr("AXFontName");
+    private static readonly IntPtr AXFontFamilyKey = CFStr("AXFontFamily");
+    private static readonly IntPtr AXFontSizeKey = CFStr("AXFontSize");
+
+    /// <summary>Font of the character before the caret (AXAttributedStringForRange → AXFont). Size in points.</summary>
+    public CaretFont? GetCaretFont()
+    {
+        IntPtr sys = IntPtr.Zero, focused = IntPtr.Zero, rangeVal = IntPtr.Zero, pv = IntPtr.Zero, astr = IntPtr.Zero;
+        try
+        {
+            int pid = FrontmostPid();
+            if (pid <= 0 || pid == Environment.ProcessId) return null;
+            sys = AXUIElementCreateApplication(pid);
+            AXUIElementSetMessagingTimeout(sys, 0.25f);
+            if (AXUIElementCopyAttributeValue(sys, AXFocused, out focused) != 0 || focused == IntPtr.Zero) return null;
+            AXUIElementSetMessagingTimeout(focused, 0.25f);
+            if (AXUIElementCopyAttributeValue(focused, AXSelRange, out rangeVal) != 0 || rangeVal == IntPtr.Zero) return null;
+            if (!AXValueGetValue(rangeVal, kAXValueCFRangeType, out CFRange range) || range.location <= 0) return null;
+            var prev = new CFRange { location = range.location - 1, length = 1 };
+            pv = AXValueCreate(kAXValueCFRangeType, ref prev);
+            if (AXUIElementCopyParameterizedAttributeValue(focused, AXAttributedStringForRange, pv, out astr) != 0 || astr == IntPtr.Zero) return null;
+            if (CFGetTypeID(astr) != CFAttributedStringGetTypeID() || CFAttributedStringGetLength(astr) < 1) return null;
+            var attrs = CFAttributedStringGetAttributes(astr, 0, IntPtr.Zero);
+            if (attrs == IntPtr.Zero) return null;
+            var font = CFDictionaryGetValue(attrs, AXFontAttr);
+            if (font == IntPtr.Zero || CFGetTypeID(font) != CFDictionaryGetTypeID()) return null;
+            string? name = DictString(font, AXFontNameKey), family = DictString(font, AXFontFamilyKey);
+            var sizeRef = CFDictionaryGetValue(font, AXFontSizeKey);
+            double size = 0;
+            if (sizeRef != IntPtr.Zero && CFGetTypeID(sizeRef) == CFNumberGetTypeID()) CFNumberGetValue(sizeRef, kCFNumberDoubleType, out size);
+            if (size <= 0 || (family ?? name) == null) return null;
+            return new CaretFont(family ?? name!, size, CaretFont.WeightFromName(name), CaretFont.ItalicFromName(name));
+        }
+        catch { return null; }
+        finally
+        {
+            if (astr != IntPtr.Zero) CFRelease(astr);
+            if (pv != IntPtr.Zero) CFRelease(pv);
+            if (rangeVal != IntPtr.Zero) CFRelease(rangeVal);
+            if (focused != IntPtr.Zero) CFRelease(focused);
+            if (sys != IntPtr.Zero) CFRelease(sys);
+        }
+    }
+
+    private static string? DictString(IntPtr dict, IntPtr key)
+    {
+        var v = CFDictionaryGetValue(dict, key);
+        return v != IntPtr.Zero && CFGetTypeID(v) == CFStringGetTypeID() ? CFString(v) : null;
+    }
+
     public (int X, int Y, int W, int H)? GetFocusRect()
     {
         IntPtr sys = IntPtr.Zero, focused = IntPtr.Zero, pos = IntPtr.Zero, size = IntPtr.Zero;

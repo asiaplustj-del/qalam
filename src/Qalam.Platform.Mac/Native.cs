@@ -50,6 +50,17 @@ internal static class Native
     [DllImport(CF, CharSet = CharSet.Unicode)] public static extern void CFStringGetCharacters(IntPtr s, CFRange range, [Out] char[] buf);
     [DllImport(CF)] public static extern IntPtr CFDataGetBytePtr(IntPtr data);
     [DllImport(CF)] public static extern bool CFBooleanGetValue(IntPtr b);
+    [DllImport(CF)] public static extern nuint CFGetTypeID(IntPtr obj);
+    [DllImport(CF)] public static extern nuint CFDictionaryGetTypeID();
+    [DllImport(CF)] public static extern nuint CFStringGetTypeID();
+    [DllImport(CF)] public static extern nuint CFNumberGetTypeID();
+    [DllImport(CF)] public static extern nuint CFAttributedStringGetTypeID();
+    [DllImport(CF)] public static extern IntPtr CFDictionaryGetValue(IntPtr dict, IntPtr key);
+    [DllImport(CF)] public static extern bool CFNumberGetValue(IntPtr number, long type, out double value);
+    public const long kCFNumberDoubleType = 13;
+    [DllImport(CF)] public static extern long CFAttributedStringGetLength(IntPtr str);
+    /// <summary>Attributes at <paramref name="loc"/> (not retained — do not release).</summary>
+    [DllImport(CF)] public static extern IntPtr CFAttributedStringGetAttributes(IntPtr str, long loc, IntPtr effectiveRange);
 
     [DllImport(Carbon)] public static extern IntPtr TISCreateInputSourceList(IntPtr props, bool includeAll);
     [DllImport(Carbon)] public static extern IntPtr TISCopyCurrentKeyboardInputSource();

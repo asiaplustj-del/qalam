@@ -72,6 +72,8 @@ public sealed class QalamApp : Application
             foreach (var m in list) m.Warmup();   // prefix index for word completion
             return list;
         });
+        // built-in word pairs (what usually comes next) — not needed for the first keystrokes, load meanwhile
+        var bigramsTask = Task.Run(() => new[] { "en", "ru", "tg" }.Select(Bigrams.LoadEmbedded).Where(b => b != null).Select(b => b!).ToList());
         Log.Info($"dictionaries loaded: {string.Join(", ", models.Select(m => $"{m.Language}={m.WordCount}"))}");
         var user = UserDictionary.Load(Path.Combine(QalamSettings.DataDir, "user.json"));
         var detector = new Detector(models, user);
@@ -98,6 +100,13 @@ public sealed class QalamApp : Application
         Phrases = UserPhrases.Load(Path.Combine(QalamSettings.DataDir, "phrases.json"));
         var engine = new SwitcherEngine(detector, supported, supported[0]) { Phrases = Phrases };
         Controller = new QalamController(platform, engine, Settings);
+        var ctl = Controller;
+        _ = bigramsTask.ContinueWith(t =>
+        {
+            if (t.IsFaulted) { Log.Error("bigrams", t.Exception); return; }
+            foreach (var b in t.Result) ctl.Completer.Builtin[b.Language] = b;
+            Log.Info($"word pairs loaded: {string.Join(", ", t.Result.Select(b => $"{b.Language}={b.Count}"))}");
+        });
         Platform = platform;
         Controller.Corrected += c => Dispatcher.UIThread.Post(() => OnCorrected(c));
         Controller.StateChanged += () => Dispatcher.UIThread.Post(UpdateState);
@@ -145,7 +154,8 @@ public sealed class QalamApp : Application
             var own = await Dispatcher.UIThread.InvokeAsync(() => _window?.OwnCaret());
             if (own is { } o)
             {
-                Dispatcher.UIThread.Post(() => { if (Controller?.CurrentSuggestion == sug) Show(sug, o.Top, o.Height, exact: true); });
+                Dispatcher.UIThread.Post(() => { if (Controller?.CurrentSuggestion == sug) Show(sug, o.Top, o.Height, exact: true,
+                    new CaretFont("", 14, 400, false), 14 * (_window?.RenderScaling ?? 1)); });
                 return;
             }
 
@@ -155,6 +165,20 @@ public sealed class QalamApp : Application
                 Log.Mark("caret query");
                 var c = Platform?.GetCaretRect();
                 bool exact = c != null;
+                // inline text after the caret is drawn in the field's own font
+                CaretFont? font = null;
+                if (exact && Settings.InlineSuggestions)
+                {
+                    var app = Platform?.ForegroundApp() ?? "";
+                    if (!_fontCache.TryGetValue(app, out var cached) || DateTime.UtcNow - cached.At > TimeSpan.FromSeconds(2)
+                        || cached.CaretH != c!.Value.H)
+                    {
+                        Log.Mark("font query");
+                        font = Platform?.GetCaretFont();
+                        _fontCache[app] = (font, c!.Value.H, DateTime.UtcNow);
+                    }
+                    else font = cached.Font;
+                }
                 if (c == null)
                 {
                     // 3) caret unknown (Telegram, some Electron apps): a small single-line field still gives
@@ -163,10 +187,10 @@ public sealed class QalamApp : Application
                     if (f is { } fr && fr.H <= 90) c = (fr.X + 6, fr.Y + 4, 1, fr.H - 8);
                 }
                 Log.Mark("idle");
-                return (c, exact);
+                return (c, exact, font);
             });
             var done = await Task.WhenAny(query, Task.Delay(400));
-            var (caret, isExact) = done == query ? query.Result : (null, false);
+            var (caret, isExact, caretFont) = done == query ? query.Result : (null, false, null);
             if (caret == null || !isExact)
             {
                 if (DateTime.UtcNow - _lastNoCaretLog > TimeSpan.FromSeconds(30))
@@ -180,14 +204,29 @@ public sealed class QalamApp : Application
                 if (Controller?.CurrentSuggestion != sug) return;
                 if (caret is not { } c) { _popup.Hide(); _ghost.Hide(); return; }
                 double scale = OperatingSystem.IsMacOS() ? (_popup.Screens.Primary?.Scaling ?? 1) : 1;  // macOS reports points
-                Show(sug, new PixelPoint((int)(c.X * scale), (int)(c.Y * scale)), (int)(c.H * scale), isExact);
+                Show(sug, new PixelPoint((int)(c.X * scale), (int)(c.Y * scale)), (int)(c.H * scale), isExact,
+                     caretFont, (caretFont?.Size ?? 0) * scale);
             });
         });
     }
 
-    private void Show(QalamController.Suggestion sug, PixelPoint top, int h, bool exact)
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (CaretFont? Font, int CaretH, DateTime At)> _fontCache = new();
+    private readonly Dictionary<string, DateTime> _placementLogged = new();
+
+    private void Show(QalamController.Suggestion sug, PixelPoint top, int h, bool exact, CaretFont? font = null, double fontPx = 0)
     {
-        if (Settings.InlineSuggestions && exact) { _popup!.Hide(); _ghost!.ShowAt(sug, sug.Typed, top, h); }
+        if (Settings.InlineSuggestions && exact)
+        {
+            _popup!.Hide();
+            _ghost!.ShowAt(sug, sug.Typed, top, h, font, fontPx);
+            // one line per app every few minutes: where the caret was and where the hint went
+            var app = Platform?.ForegroundApp() ?? "?";
+            if (!_placementLogged.TryGetValue(app, out var at) || DateTime.UtcNow - at > TimeSpan.FromMinutes(5))
+            {
+                _placementLogged[app] = DateTime.UtcNow;
+                Log.Info($"inline hint in {app}: {_ghost.LastPlacement}");
+            }
+        }
         else { _ghost!.Hide(); _popup!.ShowSuggestion(sug, top, h, exact && Settings.SuggestionAbove); }
     }
 

@@ -20,6 +20,32 @@ public readonly record struct KeyInput(
     /// <summary>Stable key name for custom hotkeys: "Q", "1", "F9", "Pause", "Insert", "CapsLock", "Num5"…</summary>
     string? KeyName = null);
 
+/// <summary>Font of the text in another app's field, as its accessibility API reports it.</summary>
+/// <param name="Family">Family name ("Helvetica Neue", "Segoe UI"); names starting with "." are hidden system fonts.</param>
+/// <param name="Size">Font size in the same units as <see cref="IKeyboardPlatform.GetCaretRect"/> (macOS: points, Windows: pixels).</param>
+/// <param name="Weight">100…900 (400 regular, 700 bold).</param>
+public sealed record CaretFont(string Family, double Size, int Weight, bool Italic)
+{
+    /// <summary>Weight guessed from a font face name: "HelveticaNeue-Bold" → 700, ".SFNS-Semibold" → 600.</summary>
+    public static int WeightFromName(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return 400;
+        var n = name.ToLowerInvariant().Replace(" ", "").Replace("-", "");
+        if (n.Contains("black") || n.Contains("heavy")) return 900;
+        if (n.Contains("extrabold") || n.Contains("ultrabold")) return 800;
+        if (n.Contains("semibold") || n.Contains("demibold")) return 600;
+        if (n.Contains("bold")) return 700;
+        if (n.Contains("medium")) return 500;
+        if (n.Contains("extralight") || n.Contains("ultralight")) return 200;
+        if (n.Contains("thin") || n.Contains("hairline")) return 100;
+        if (n.Contains("light")) return 300;
+        return 400;
+    }
+
+    public static bool ItalicFromName(string? name) =>
+        name != null && (name.Contains("Italic", StringComparison.OrdinalIgnoreCase) || name.Contains("Oblique", StringComparison.OrdinalIgnoreCase));
+}
+
 /// <summary>Everything the controller needs from Windows / macOS.</summary>
 public interface IKeyboardPlatform : IDisposable
 {
@@ -49,6 +75,8 @@ public interface IKeyboardPlatform : IDisposable
     (int X, int Y, int W, int H)? GetCaretRect();
     /// <summary>Frame of the focused text field (when the exact caret is unknown), physical pixels; null if unknown.</summary>
     (int X, int Y, int W, int H)? GetFocusRect() => null;
+    /// <summary>Font of the text right before the caret in the focused field (for inline suggestions); null if unknown.</summary>
+    CaretFont? GetCaretFont() => null;
     void SetStartWithSystem(bool enabled);
     /// <summary>True when a laptop runs on battery (no charger).</summary>
     bool IsOnBattery();

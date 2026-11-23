@@ -331,6 +331,60 @@ public sealed class WindowsPlatform : IKeyboardPlatform
         return null;
     }
 
+    private static IUIAutomation? _uia;
+    private static bool _uiaFailed;
+
+    /// <summary>Font of the character before the caret via UI Automation (TextPattern). Size in pixels.</summary>
+    public CaretFont? GetCaretFont()
+    {
+        if (_uiaFailed) return null;
+        var toRelease = new List<object>();
+        try
+        {
+            var fg = GetForegroundWindow();
+            uint tid = GetWindowThreadProcessId(fg, out uint fpid);
+            if (fpid == (uint)Environment.ProcessId) return null;   // our own UI answers on our UI thread → no self-queries
+            if (_uia == null)
+            {
+                try { _uia = (IUIAutomation)Activator.CreateInstance(Type.GetTypeFromCLSID(CLSID_CUIAutomation)!)!; }
+                catch { _uiaFailed = true; return null; }
+            }
+            if (_uia.GetFocusedElement(out var el) != 0 || el == null) return null;
+            toRelease.Add(el);
+            var iid = IID_IUIAutomationTextPattern;
+            if (el.GetCurrentPatternAs(UIA_TextPatternId, ref iid, out var pp) != 0 || pp == IntPtr.Zero) return null;
+            var tp = (IUIAutomationTextPattern)Marshal.GetObjectForIUnknown(pp);
+            Marshal.Release(pp);
+            toRelease.Add(tp);
+            if (tp.GetSelection(out var arr) != 0 || arr == null) return null;
+            toRelease.Add(arr);
+            if (arr.get_Length(out int n) != 0 || n < 1 || arr.GetElement(0, out var sel) != 0 || sel == null) return null;
+            toRelease.Add(sel);
+            if (sel.Clone(out var r) != 0 || r == null) return null;
+            toRelease.Add(r);
+            r.MoveEndpointByUnit(0, 0, -1, out _);   // cover the character before the caret
+
+            string? family = Attr(r, UIA_FontNameAttributeId) as string;
+            double pt = Attr(r, UIA_FontSizeAttributeId) is double d ? d : 0;
+            int weight = Attr(r, UIA_FontWeightAttributeId) is int w && w > 0 ? w : 400;
+            bool italic = Attr(r, UIA_IsItalicAttributeId) is true;
+            if (string.IsNullOrWhiteSpace(family) || pt <= 0) return null;
+
+            var gti = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
+            var hwnd = GetGUIThreadInfo(tid, ref gti) && gti.hwndFocus != IntPtr.Zero ? gti.hwndFocus : fg;
+            uint dpi = 96;
+            try { dpi = GetDpiForWindow(hwnd); if (dpi == 0) dpi = 96; } catch { }
+            return new CaretFont(family, pt * dpi / 72.0, weight, italic);
+        }
+        catch { return null; }
+        finally
+        {
+            foreach (var o in toRelease) try { Marshal.ReleaseComObject(o); } catch { }
+        }
+    }
+
+    private static object? Attr(IUIAutomationTextRange r, int id) => r.GetAttributeValue(id, out var v) == 0 ? v : null;
+
     public bool IsOnBattery() => GetSystemPowerStatus(out var st) && st.ACLineStatus == 0;
 
     private static IntPtr _job;

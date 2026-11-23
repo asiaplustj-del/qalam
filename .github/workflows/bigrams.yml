@@ -1,0 +1,41 @@
+name: bigrams
+
+# Rebuilds the built-in word pairs (src/Qalam.Core/Data/bigram_*.txt.gz) from public corpora
+# and commits them. Run by hand (Actions → bigrams → Run workflow) or when the builder changes.
+on:
+  workflow_dispatch:
+    inputs:
+      languages:
+        description: 'Languages (space-separated), empty = tg ru en'
+        required: false
+        default: ''
+  push:
+    branches: [ main ]
+    paths: [ 'tools/bigrams/build.py', '.github/workflows/bigrams.yml' ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bigrams
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -q pyarrow
+      - name: Count word pairs
+        run: python3 tools/bigrams/build.py ${{ github.event.inputs.languages }}
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/Qalam.Core/Data/bigram_*.txt.gz tools/bigrams/last_build.json
+          if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+          git commit -m "Built-in word pairs rebuilt from corpora [skip ci]"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push && break; sleep 5; done

@@ -135,4 +135,76 @@ internal static class Native
     [DllImport("kernel32.dll")] public static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
     [DllImport("kernel32.dll")] public static extern IntPtr GlobalLock(IntPtr h);
     [DllImport("kernel32.dll")] public static extern bool GlobalUnlock(IntPtr h);
+
+    // ---- UI Automation (font of the text at the caret). Only the vtable slots we call are typed;
+    //      the others are placeholders that keep the order of UIAutomationClient.h.
+    public static readonly Guid CLSID_CUIAutomation = new("FF48DBA4-60EF-4201-AA87-54103EEF594E");
+    public static Guid IID_IUIAutomationTextPattern = new("32EBA289-3583-42C9-9C59-3B6D9A1E9B6A");
+    public const int UIA_TextPatternId = 10014;
+    public const int UIA_FontNameAttributeId = 40005, UIA_FontSizeAttributeId = 40006, UIA_FontWeightAttributeId = 40007,
+        UIA_IsItalicAttributeId = 40014;
+
+    [ComImport, Guid("30CBE57D-D9D0-452A-AB13-7AC5AC4825EE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IUIAutomation
+    {
+        [PreserveSig] int _CompareElements();
+        [PreserveSig] int _CompareRuntimeIds();
+        [PreserveSig] int _GetRootElement();
+        [PreserveSig] int _ElementFromHandle();
+        [PreserveSig] int _ElementFromPoint();
+        [PreserveSig] int GetFocusedElement([MarshalAs(UnmanagedType.Interface)] out IUIAutomationElement? element);
+    }
+
+    [ComImport, Guid("D22108AA-8AC5-49A5-837B-37BBB3D7591E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IUIAutomationElement
+    {
+        [PreserveSig] int _SetFocus();
+        [PreserveSig] int _GetRuntimeId();
+        [PreserveSig] int _FindFirst();
+        [PreserveSig] int _FindAll();
+        [PreserveSig] int _FindFirstBuildCache();
+        [PreserveSig] int _FindAllBuildCache();
+        [PreserveSig] int _BuildUpdatedCache();
+        [PreserveSig] int _GetCurrentPropertyValue();
+        [PreserveSig] int _GetCurrentPropertyValueEx();
+        [PreserveSig] int _GetCachedPropertyValue();
+        [PreserveSig] int _GetCachedPropertyValueEx();
+        [PreserveSig] int GetCurrentPatternAs(int patternId, ref Guid riid, out IntPtr patternObject);
+    }
+
+    [ComImport, Guid("32EBA289-3583-42C9-9C59-3B6D9A1E9B6A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IUIAutomationTextPattern
+    {
+        [PreserveSig] int _RangeFromPoint();
+        [PreserveSig] int _RangeFromChild();
+        [PreserveSig] int GetSelection([MarshalAs(UnmanagedType.Interface)] out IUIAutomationTextRangeArray? ranges);
+    }
+
+    [ComImport, Guid("CE4AE76A-E717-4C98-81EA-47371D028EB6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IUIAutomationTextRangeArray
+    {
+        [PreserveSig] int get_Length(out int length);
+        [PreserveSig] int GetElement(int index, [MarshalAs(UnmanagedType.Interface)] out IUIAutomationTextRange? element);
+    }
+
+    [ComImport, Guid("A543CC6A-F4AE-494B-8239-C814481187A8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IUIAutomationTextRange
+    {
+        [PreserveSig] int Clone([MarshalAs(UnmanagedType.Interface)] out IUIAutomationTextRange? clone);
+        [PreserveSig] int _Compare();
+        [PreserveSig] int _CompareEndpoints();
+        [PreserveSig] int _ExpandToEnclosingUnit();
+        [PreserveSig] int _FindAttribute();
+        [PreserveSig] int _FindText();
+        [PreserveSig] int GetAttributeValue(int attr, [MarshalAs(UnmanagedType.Struct)] out object? value);
+        [PreserveSig] int _GetBoundingRectangles();
+        [PreserveSig] int _GetEnclosingElement();
+        [PreserveSig] int _GetText();
+        [PreserveSig] int _Move();
+        /// <param name="endpoint">0 = start, 1 = end.</param>
+        /// <param name="unit">0 = character.</param>
+        [PreserveSig] int MoveEndpointByUnit(int endpoint, int unit, int count, out int moved);
+    }
+
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
 }

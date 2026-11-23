@@ -335,5 +335,39 @@ Console.WriteLine("\n=== Phrase cleaning ===");
     Check("empty rejected", PhraseText.Clean("\n", ctx) == null);
 }
 
+Console.WriteLine("\n=== Built-in word pairs ===");
+{
+    // ranking logic, independent of the shipped data
+    var ms = new MemoryStream();
+    using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionLevel.Fastest, true))
+    using (var w = new StreamWriter(gz)) w.Write("может\tбыть 8.4 покажешь 7.6\n");
+    ms.Position = 0;
+    var comp = new Completer(det);
+    var plain = comp.Complete("пок", L["ru"], "ru", 4, "может").Select(c => c.Word).ToList();
+    comp.Builtin["ru"] = Bigrams.Load("ru", ms);
+    var withPairs = comp.Complete("пок", L["ru"], "ru", 4, "может").Select(c => c.Word).ToList();
+    Check($"pair lifts the usual next word: [{string.Join(",", plain)}] → [{string.Join(",", withPairs)}]", withPairs.FirstOrDefault() == "покажешь");
+    var other = comp.Complete("пок", L["ru"], "ru", 4, "мы").Select(c => c.Word).ToList();
+    Check($"no pair → dictionary order: [{string.Join(",", other)}]", other.SequenceEqual(comp.Complete("пок", L["ru"], "ru", 4, null).Select(c => c.Word)));
+
+    // the shipped data (if this build has it)
+    foreach (var lang in new[] { "ru", "en", "tg" })
+    {
+        var bg = Bigrams.LoadEmbedded(lang);
+        if (bg == null) { Console.WriteLine($"  [{lang}] no built-in pairs in this build"); continue; }
+        var c2 = new Completer(det); c2.Builtin[lang] = bg;
+        var probes = lang switch
+        {
+            "ru" => new[] { ("может", "пок"), ("добрый", "дне"), ("большое", "спа"), ("как", "дел") },
+            "en" => new[] { ("thank", "yo"), ("good", "mor"), ("let", "kno"), ("in", "ord") },
+            _ => new[] { ("ҷумҳурии", "тоҷ"), ("рӯзи", "хуш"), ("дар", "бор"), ("ба", "ман") },
+        };
+        var lay = L[lang];
+        Console.WriteLine($"  [{lang}] {bg.Count} words with pairs: " + string.Join("  ", probes.Select(p =>
+            $"{p.Item1} {p.Item2}… → {string.Join("/", c2.Complete(p.Item2, lay, lang, 3, p.Item1).Select(x => x.Word))}")));
+        Check($"[{lang}] pairs loaded", bg.Count > 1000);
+    }
+}
+
 Console.WriteLine(failures == 0 ? "\nQUALITY OK" : $"\nQUALITY FAILED ({failures})");
 return failures == 0 ? 0 : 1;
