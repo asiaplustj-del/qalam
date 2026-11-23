@@ -36,7 +36,8 @@ DATA = os.path.join(ROOT, "src", "Qalam.Core", "Data")
 MAX_TOKENS = {"ru": 45_000_000, "en": 45_000_000, "tg": 60_000_000}
 MIN_TOKENS = 2_000_000          # less than this → the file would be noise; keep the old one
 MAX_PREV = {"ru": 22_000, "en": 18_000, "tg": 22_000}   # most frequent previous words kept
-TOP_K = 12                      # followers per word
+TOP_K = 20                      # followers per word
+MIN_NEXT_LEN = 4                # completion starts after 3 letters → shorter followers are never shown
 MIN_PAIR = 3                    # a pair must be seen at least this often
 MIN_PREV = 30                   # and its first word this often
 
@@ -110,9 +111,9 @@ def leipzig(names, _):
             for m in tar:
                 if not m.name.endswith("-sentences.txt"):
                     continue
-                f = tar.extractfile(m)
-                for raw in io.TextIOWrapper(f, encoding="utf-8", errors="ignore"):
-                    _, _, sent = raw.partition("\t")
+                f = tar.extractfile(m)   # a stream member: not seekable, so no TextIOWrapper
+                for raw in f:
+                    _, _, sent = raw.decode("utf-8", "ignore").partition("\t")
                     yield sent
         return   # one corpus of the group is enough
     raise RuntimeError("none of the Leipzig names exist")
@@ -189,7 +190,7 @@ def count(lang, vocab):
 def write(lang, uni, pairs):
     followers = collections.defaultdict(list)
     for (a, b), n in pairs.items():
-        if n >= MIN_PAIR:
+        if n >= MIN_PAIR and len(b) >= MIN_NEXT_LEN:
             followers[a].append((n, b))
     prevs = sorted((w for w in followers if uni[w] >= MIN_PREV), key=lambda w: -uni[w])[:MAX_PREV[lang]]
     path = os.path.join(DATA, f"bigram_{lang}.txt.gz")
