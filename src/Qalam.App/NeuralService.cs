@@ -120,12 +120,16 @@ public sealed class NeuralService : IDisposable
         _cts?.Cancel();
         var cts = _cts = new CancellationTokenSource();
         var context = fieldText.Length > 800 ? fieldText[^800..] : fieldText;
-        if (context.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length < 2) return;
         _ = Task.Run(async () =>
         {
             try
             {
                 if (!req.Urgent) await Task.Delay(Math.Clamp(_s.NeuralPauseMs, 0, 2000), cts.Token);
+                // the real text of the field (also what was there before Qalam saw you type): the model
+                // understands much more from a whole paragraph than from the last few words
+                context = RealContext(context, fieldText);
+                if (cts.IsCancellationRequested) return;
+                if (context.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length < 2) return;
                 if (UseBuiltin && Engine.State != LlamaEngine.EngineState.Ready) LogSkip($"engine {Engine.State} — loading the model, suggestions start when it is ready");
                 // inside a word a short answer is enough (and quicker): the word and a few more
                 int tokens = req.MidWord ? Math.Min(10, _s.PhraseMaxTokens) : _s.PhraseMaxTokens;
@@ -134,10 +138,24 @@ public sealed class NeuralService : IDisposable
                 _asked++;
                 if (string.IsNullOrWhiteSpace(raw)) _empty++; else _answered++;
                 if (_asked % 20 == 1) Log.Info($"neural: {_asked} requests, {_answered} answers, {_empty} empty (engine {Engine.State})");
-                if (raw != null) controller.OfferPhrase(version, raw);
+                if (raw != null) controller.OfferPhrase(version, raw, context);
             }
             catch { }
         });
+    }
+
+    private string RealContext(string context, string typed)
+    {
+        try
+        {
+            var real = _platform?.GetTextBeforeCaret(800);
+            if (string.IsNullOrEmpty(real)) return context;
+            // only if it really is the field being typed in: it must end with what Qalam saw typed
+            var tail = typed.Length > 12 ? typed[^12..] : typed;
+            if (tail.Length > 0 && !real.EndsWith(tail, StringComparison.Ordinal)) return context;
+            return real.Replace("\r\n", "\n").Replace('\r', '\n');
+        }
+        catch { return context; }
     }
 
     private void LogSkip(string why)

@@ -33,6 +33,7 @@ internal static class Native
     [DllImport(CG)] public static extern IntPtr CGEventCreateKeyboardEvent(IntPtr source, ushort keycode, bool down);
     [DllImport(CG, CharSet = CharSet.Unicode)] public static extern void CGEventKeyboardSetUnicodeString(IntPtr evt, nuint len, char[] chars);
     [DllImport(CG)] public static extern void CGEventPost(uint tap, IntPtr evt);
+    [DllImport(CG)] public static extern IntPtr CGEventCreateCopy(IntPtr evt);
     [DllImport(CG)] public static extern bool CGPreflightListenEventAccess();
     [DllImport(CG)] public static extern bool CGRequestListenEventAccess();
     [DllImport(CG)] public static extern bool CGRequestPostEventAccess();

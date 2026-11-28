@@ -222,6 +222,19 @@ Console.WriteLine("\n=== Typos and context ===");
     fp.Screen.Clear(); fp.Click(); fp.Current = L["en"];
     fp.Type("I hvae a dog ", L["en"]);
     Check($"English typo: '{fp.Screen}'", fp.Screen.ToString() == "I have a dog ");
+    // a stale layout report right after our own switch must not cut the next word
+    fp.Screen.Clear(); fp.Click(); fp.Current = L["en"];
+    fp.Type("привет ", L["ru"]);
+    fp.Current = L["en"];   // the system still reports the old layout for a moment
+    fp.Type("Хат", L["ru"]);
+    Check($"stale layout report ignored: {ctl.Engine.CurrentLayout.Language} '{ctl.Engine.CurrentWordText}'",
+          ctl.Engine.CurrentLayout.Language == "ru" && ctl.Engine.CurrentWordText == "Хат");
+    // a layout switched by hand in the middle of a word: the word is left exactly as typed
+    fp.Screen.Clear(); fp.Click(); fp.Current = L["ru"];
+    fp.Type("Ха", L["ru"]); fp.Current = L["en"]; fp.Type("nfh ", L["en"]);
+    Check($"mixed word untouched: '{fp.Screen}'", fp.Screen.ToString() == "Хаnfh ");
+    Check("no forgotten first letter is invented", ctl.Engine.Speller.Fix("атар", L["tg"], "tg", false) != "хатар" && ctl.Engine.Speller.Fix("ривет", L["ru"], "ru", false) == null);
+    fp.Current = L["ru"];
     settings.FixTypos = false; ctl.ApplySettings();
     fp.Screen.Clear(); fp.Click(); fp.Current = L["ru"];
     fp.Type("превед ", L["ru"]);

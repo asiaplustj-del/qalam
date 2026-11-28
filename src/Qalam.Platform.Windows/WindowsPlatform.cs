@@ -20,6 +20,18 @@ public sealed class WindowsPlatform : IKeyboardPlatform
     private IntPtr _kbHook, _mouseHook;
     private HookProc? _kbProc, _mouseProc;          // keep delegates alive
     private readonly BlockingCollection<Action> _work = new();
+    // typing we still have to send: the user's next keys wait behind it, so nothing lands out of order
+    private int _pending;
+    private DateTime _busySince;
+    private bool Busy => Volatile.Read(ref _pending) > 0 && (DateTime.UtcNow - _busySince).TotalSeconds < 2;
+    // modifier state as the user pressed it (deferred keys have not reached the system yet)
+    private static bool _shift, _ctrl, _alt, _win;
+
+    private void Enqueue(Action a)
+    {
+        if (Interlocked.Increment(ref _pending) == 1) _busySince = DateTime.UtcNow;
+        _work.Add(() => { try { a(); } finally { Interlocked.Decrement(ref _pending); } });
+    }
     private Thread? _worker;
     private const nuint Marker = 0x51414C4D;        // "QALM" in dwExtraInfo of our injected input
 
@@ -45,6 +57,7 @@ public sealed class WindowsPlatform : IKeyboardPlatform
 
     public void Start()
     {
+        _shift = Down(VK_SHIFT); _ctrl = Down(VK_CONTROL); _alt = Down(VK_MENU); _win = Down(VK_LWIN) || Down(VK_RWIN);
         _worker = new Thread(() => { foreach (var a in _work.GetConsumingEnumerable()) { try { a(); } catch { } } })
         { IsBackground = true, Name = "Qalam input worker" };
         _worker.Start();
@@ -81,8 +94,26 @@ public sealed class WindowsPlatform : IKeyboardPlatform
             {
                 int msg = (int)wParam;
                 bool down = msg is WM_KEYDOWN or WM_SYSKEYDOWN;
+                switch (info.vkCode)
+                {
+                    case 0x10 or 0xA0 or 0xA1: _shift = down; break;
+                    case 0x11 or 0xA2 or 0xA3: _ctrl = down; break;
+                    case 0x12 or 0xA4 or 0xA5: _alt = down; break;
+                    case 0x5B or 0x5C: _win = down; break;
+                }
                 var input = Translate(info, down);
                 if (handler(input)) return (IntPtr)1;
+                if (Busy)
+                {
+                    // our replacement is still being typed: send this key after it
+                    var ki = new KEYBDINPUT
+                    {
+                        wVk = (ushort)info.vkCode, wScan = (ushort)info.scanCode, dwExtraInfo = (IntPtr)Marker,
+                        dwFlags = (down ? 0 : KEYEVENTF_KEYUP) | ((info.flags & LLKHF_EXTENDED) != 0 ? KEYEVENTF_EXTENDEDKEY : 0)
+                    };
+                    Enqueue(() => Send(new List<INPUT> { new INPUT { type = INPUT_KEYBOARD, u = new InputUnion { ki = ki } } }));
+                    return (IntPtr)1;
+                }
             }
         }
         return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
@@ -101,7 +132,8 @@ public sealed class WindowsPlatform : IKeyboardPlatform
     {
         uint vk = info.vkCode;
         bool extended = (info.flags & LLKHF_EXTENDED) != 0;
-        bool shift = Down(VK_SHIFT), ctrl = Down(VK_CONTROL), alt = Down(VK_MENU), win = Down(VK_LWIN) || Down(VK_RWIN);
+        // tracked from the hook itself: a deferred Shift has not reached the system yet
+        bool shift = _shift, ctrl = _ctrl, alt = _alt, win = _win;
         bool caps = (GetKeyState(VK_CAPITAL) & 1) != 0;
 
         SpecialKey sp = vk switch
@@ -204,8 +236,8 @@ public sealed class WindowsPlatform : IKeyboardPlatform
     public void SwitchLayout(KeyboardLayout layout)
     {
         if (layout.NativeHandle is not IntPtr hkl) return;
-        _pendingLayout = layout; _pendingUntil = DateTime.UtcNow.AddMilliseconds(400);
-        _work.Add(() =>
+        _pendingLayout = layout; _pendingUntil = DateTime.UtcNow.AddMilliseconds(1000);
+        Enqueue(() =>
         {
             var hwnd = GetForegroundWindow();
             PostMessage(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl);
@@ -215,7 +247,7 @@ public sealed class WindowsPlatform : IKeyboardPlatform
     // ------------------------------------------------------------------ typing
     public void Replace(int erase, string text, Action? then = null)
     {
-        _work.Add(() =>
+        Enqueue(() =>
         {
             var inputs = new List<INPUT>();
             for (int i = 0; i < erase; i++) AddVk(inputs, VK_BACK);
@@ -234,7 +266,7 @@ public sealed class WindowsPlatform : IKeyboardPlatform
     {
         ushort vk = key switch { SpecialKey.Space => VK_SPACE, SpecialKey.Enter => VK_RETURN, SpecialKey.Tab => VK_TAB, _ => 0 };
         if (vk == 0) return;
-        _work.Add(() => { var l = new List<INPUT>(); AddVk(l, vk); Send(l); });
+        Enqueue(() => { var l = new List<INPUT>(); AddVk(l, vk); Send(l); });
     }
 
     private static void AddVk(List<INPUT> l, ushort vk, bool? onlyDown = null)
@@ -259,7 +291,7 @@ public sealed class WindowsPlatform : IKeyboardPlatform
     // ------------------------------------------------------------------ selection
     public void ConvertSelection(Func<string, string?> convert)
     {
-        _work.Add(() =>
+        Enqueue(() =>
         {
             // let the user release the hotkey, then make sure no modifier is logically pressed
             Thread.Sleep(60);

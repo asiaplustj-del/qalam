@@ -35,7 +35,14 @@ public sealed class SwitcherEngine
     private string? _manualVariant, _manualOnScreen;
 
     public IReadOnlyList<KeyboardLayout> Layouts { get; set; }
-    public KeyboardLayout CurrentLayout { get; set; }
+    private KeyboardLayout _current = null!;
+    public KeyboardLayout CurrentLayout
+    {
+        get => _current;
+        set { if (_current != null && value.Id != _current.Id) LastLayoutBeforeSwitch = _current.Id; _current = value; }
+    }
+    /// <summary>The layout that was current before the last change.</summary>
+    public string? LastLayoutBeforeSwitch { get; private set; }
     public bool AutoMode { get; set; } = true;
     public bool Paused { get; set; }
     /// <summary>Learn an exception when the user undoes an automatic correction.</summary>
@@ -117,7 +124,9 @@ public sealed class SwitcherEngine
         Correction? result = null;
         bool converted = false;
         _wordRenderLen = CurrentLayout.Render(_word).Length;
-        if (_word.Count > 0 && AutoMode && !Paused)
+        bool unsafeWord = _unsafeWord;
+        _unsafeWord = false;
+        if (_word.Count > 0 && AutoMode && !Paused && !unsafeWord)
         {
             var d = _detector.Decide(CurrentLayout, Layouts, _word, _contextLang);
             if (d != null)
@@ -347,8 +356,16 @@ public sealed class SwitcherEngine
     }
 
     /// <summary>Mouse click, focus change, arrows, Ctrl+… — context is lost.</summary>
+    /// <summary>
+    /// The current word can no longer be trusted (layout switched by hand in the middle of it): it is
+    /// committed as typed, without any correction.
+    /// </summary>
+    public void MarkWordUnsafe() { if (_word.Count > 0) _unsafeWord = true; }
+    private bool _unsafeWord;
+
     public void Reset()
     {
+        _unsafeWord = false;
         _word.Clear(); _lastWord = new(); _boundaryLeft = 0; _contextLang = null; _lastConverted = false; _committed.Clear();
         _prevCore = null;
         _undoAvailable = false; _manualActive = false;

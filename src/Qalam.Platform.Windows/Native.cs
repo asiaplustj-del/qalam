@@ -11,7 +11,7 @@ internal static class Native
     public const uint LLKHF_EXTENDED = 0x01, LLKHF_INJECTED = 0x10;
     public const uint MAPVK_VSC_TO_VK = 1;
     public const uint INPUT_KEYBOARD = 1;
-    public const uint KEYEVENTF_KEYUP = 0x2, KEYEVENTF_UNICODE = 0x4;
+    public const uint KEYEVENTF_KEYUP = 0x2, KEYEVENTF_UNICODE = 0x4, KEYEVENTF_EXTENDEDKEY = 0x1;
     public const uint CF_UNICODETEXT = 13, GMEM_MOVEABLE = 2;
 
     public const int VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_CAPITAL = 0x14, VK_LWIN = 0x5B, VK_RWIN = 0x5C;

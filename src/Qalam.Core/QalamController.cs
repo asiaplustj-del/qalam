@@ -53,7 +53,7 @@ public sealed class QalamController : IDisposable
         engine.Speller ??= new SpellFixer(engine.Detector);
         ApplySettings();
         platform.KeyHandler = OnKey;
-        platform.MouseClicked += () => { lock (_sync) { Engine.Reset(); ClearSuggestion(); } };
+        platform.MouseClicked += () => { lock (_sync) { Engine.Reset(); ClearSuggestion(); _switchedFrom = null; } };
     }
 
     public void ApplySettings()
@@ -215,7 +215,8 @@ public sealed class QalamController : IDisposable
     /// Called by the neural module when its answer arrives; ignored if the user kept typing.
     /// <paramref name="text"/> is the model's raw continuation of the field text.
     /// </summary>
-    public void OfferPhrase(long version, string text)
+    /// <param name="context">The text the model continued (default: what Qalam saw typed).</param>
+    public void OfferPhrase(long version, string text, string? context = null)
     {
         lock (_sync)
         {
@@ -223,10 +224,11 @@ public sealed class QalamController : IDisposable
             if (!Engine.WordInProgress)
             {
                 var field = Engine.FieldText;
-                var phrase = PhraseText.Clean(text, field, Settings.PhraseMaxWords, Settings.NeuralLength >= 3 ? 2 : 1);
+                var phrase = PhraseText.Clean(text, context ?? field, Settings.PhraseMaxWords, Settings.NeuralLength >= 3 ? 2 : 1);
                 if (phrase == null) return;
                 // the text ends right after a word or a mark ("друзья", "дела?") → a word needs a space first
-                if (field.Length > 0 && !char.IsWhiteSpace(field[^1]) && char.IsLetterOrDigit(phrase[0])) phrase = " " + phrase;
+                var seen = context ?? field;
+                if (seen.Length > 0 && !char.IsWhiteSpace(seen[^1]) && char.IsLetterOrDigit(phrase[0])) phrase = " " + phrase;
                 if (_remainder && CurrentSuggestion is { IsPhrase: true } shown)
                 {
                     // keep what is already shown unless the new answer continues it and is longer
@@ -247,11 +249,13 @@ public sealed class QalamController : IDisposable
             bool typedIsWeak = best != null && WordZipf(best.Word.ToLowerInvariant()) - WordZipf(lowerTyped) >= 1.0;
             Func<string, bool> isWord = w => !(typedIsWeak && w == lowerTyped) && IsWord(w);
             int more = Math.Max(2, Settings.PhraseMaxWords - 1);
-            var full = PhraseText.CompleteWord(text, typed, before, isWord, more);
+            // echo removal against the text the model really saw (the whole field, when it could be read)
+            var echoContext = context != null && context.EndsWith(typed, StringComparison.Ordinal) ? context[..^typed.Length] : before;
+            var full = PhraseText.CompleteWord(text, typed, echoContext, isWord, more);
             // the model treated the unfinished word as finished → finish it from the dictionary, keep the continuation
             if (full == null && best != null)
             {
-                var viaDict = PhraseText.CompleteWord(text, best.Word, before, IsWord, more);
+                var viaDict = PhraseText.CompleteWord(text, best.Word, echoContext, IsWord, more);
                 if (viaDict != null && viaDict.Length > best.Word.Length) full = viaDict;
             }
             if (full == null) return;
@@ -379,7 +383,7 @@ public sealed class QalamController : IDisposable
                 // swallow the key, rewrite the word, then replay the original key
                 var text = c.Insert[..^boundary.Length];
                 _platform.Replace(c.Erase, text);
-                if (c.SwitchTo != null) _platform.SwitchLayout(c.SwitchTo);
+                if (c.SwitchTo != null) { _platform.SwitchLayout(c.SwitchTo); NoteOwnSwitch(); }
                 _platform.ReplayKey(k.Special);
                 Corrected?.Invoke(c);
                 return true;
@@ -441,7 +445,7 @@ public sealed class QalamController : IDisposable
         var c = Engine.Manual();
         if (c == null) return;
         _platform.Replace(c.Erase, c.Insert);
-        if (c.SwitchTo != null) _platform.SwitchLayout(c.SwitchTo);
+        if (c.SwitchTo != null) { _platform.SwitchLayout(c.SwitchTo); NoteOwnSwitch(); }
         Corrected?.Invoke(c);
     }
 
@@ -453,22 +457,28 @@ public sealed class QalamController : IDisposable
             (string Text, KeyboardLayout Target)? r;
             lock (_sync) r = Engine.ConvertText(text);
             if (r is not { } res) return null;
-            _platform.SwitchLayout(res.Target);
+            _platform.SwitchLayout(res.Target); NoteOwnSwitch(Engine.CurrentLayout.Id);
             lock (_sync) Engine.CurrentLayout = res.Target;
             Corrected?.Invoke(new Correction(text.Length, res.Text, res.Target, CorrectionKind.Selection, text, res.Text));
             return res.Text;
         });
     }
 
+    private DateTime _ownSwitchAt;
+    private string? _switchedFrom;
+
+    private void NoteOwnSwitch(string? from = null) { _ownSwitchAt = DateTime.UtcNow; _switchedFrom = from ?? Engine.LastLayoutBeforeSwitch; }
+
     private void SyncLayout()
     {
         var cur = _platform.GetCurrentLayout(Engine.Layouts);
-        if (cur != null && cur.Id != Engine.CurrentLayout.Id)
-        {
-            // the user switched the layout by hand: the current word is now mixed, start fresh
-            Engine.Reset();
-            Engine.CurrentLayout = cur;
-        }
+        if (cur == null || cur.Id == Engine.CurrentLayout.Id) return;
+        // right after our own switch the system may still report the old layout for a moment
+        if (cur.Id == _switchedFrom && (DateTime.UtcNow - _ownSwitchAt).TotalMilliseconds < 1200) return;
+        // the user switched the layout by hand
+        if (Engine.WordInProgress) Engine.MarkWordUnsafe();   // a mixed word: leave it exactly as typed
+        else Engine.Reset();
+        Engine.CurrentLayout = cur;
     }
 
     private bool IsExcludedApp()

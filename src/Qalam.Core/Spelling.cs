@@ -328,7 +328,9 @@ public sealed class SpellFixer
         }
         for (int i = 0; i <= lower.Length; i++)
         {
-            // a letter is missing: "привт" → "привет"
+            // a letter is missing: "привт" → "привет" (never the first one: "атар" is more likely the end of a
+            // word whose start we did not see than "хатар" with a forgotten "х")
+            if (i > 0)
             foreach (var c in alphabet)
                 Consider(lower[..i] + c + lower[i..], (i > 0 && lower[i - 1] == c) || (i < lower.Length && lower[i] == c) ? 0.4 : 0.1);
             if (i == lower.Length) break;
@@ -346,7 +348,8 @@ public sealed class SpellFixer
                 if (c != lower[i])
                 {
                     bool near = KeyNeighbours.Adjacent(layout, lower[i], c);
-                    Consider(lower[..i] + c + lower[(i + 1)..], near ? 0.6 : tail);
+                    // the first letter is rarely the slip (and may belong to a word we only saw the end of)
+                    Consider(lower[..i] + c + lower[(i + 1)..], (near ? 0.6 : tail) - (i == 0 ? 0.8 : 0));
                 }
             // two letters swapped: "приевт" → "привет"
             if (i + 1 < lower.Length && lower[i] != lower[i + 1])

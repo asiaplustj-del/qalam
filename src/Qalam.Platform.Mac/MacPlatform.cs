@@ -18,6 +18,27 @@ public sealed class MacPlatform : IKeyboardPlatform
     private IntPtr _tap, _runLoop;
     private CGEventTapCallBack? _callback;            // keep alive
     private readonly BlockingCollection<Action> _work = new();
+    // typing we still have to send: the user's next keys wait behind it, so nothing lands out of order
+    private int _pending;
+    private DateTime _busySince;
+    // a stuck queue must never hold the keyboard: after 2 s keys pass straight through again
+    private bool Busy => Volatile.Read(ref _pending) > 0 && (DateTime.UtcNow - _busySince).TotalSeconds < 2;
+
+    private void Enqueue(Action a)
+    {
+        if (Interlocked.Increment(ref _pending) == 1) _busySince = DateTime.UtcNow;
+        _work.Add(() => { try { a(); } finally { Interlocked.Decrement(ref _pending); } });
+    }
+
+    /// <summary>The user's key arrived while our replacement is still being typed: send it after it.</summary>
+    private IntPtr Defer(IntPtr evt)
+    {
+        var copy = CGEventCreateCopy(evt);
+        if (copy == IntPtr.Zero) return evt;
+        CGEventSetIntegerValueField(copy, kCGEventSourceUserData, Marker);
+        Enqueue(() => { CGEventPost(kCGHIDEventTap, copy); CFRelease(copy); Thread.Sleep(1); });
+        return IntPtr.Zero;
+    }
     private Thread? _worker;
     private const long Marker = 0x51414C4D;
     private ulong _prevFlags;
@@ -147,7 +168,7 @@ public sealed class MacPlatform : IKeyboardPlatform
                 bool down = (flags & bit) != 0;
                 _prevFlags = flags;
                 handler(new KeyInput(down, sp, '\0', RightSide: right));
-                return evt;
+                return Busy ? Defer(evt) : evt;
             }
 
             bool isDown = type == kCGEventKeyDown;
@@ -168,7 +189,8 @@ public sealed class MacPlatform : IKeyboardPlatform
             // Option on Mac types special characters; we treat Option+key as a shortcut (context reset)
             string? name = key != '\0' ? char.ToUpperInvariant(key).ToString() : KeyNames.GetValueOrDefault(code, $"Key{code}");
             var input = new KeyInput(isDown, special, key, shift, caps, ctrl, alt, cmd, KeyName: name);
-            return handler(input) ? IntPtr.Zero : evt;
+            if (handler(input)) return IntPtr.Zero;
+            return Busy ? Defer(evt) : evt;
         }
         catch { return evt; }
     }
@@ -225,7 +247,7 @@ public sealed class MacPlatform : IKeyboardPlatform
     public void SwitchLayout(KeyboardLayout layout)
     {
         if (layout.NativeHandle is not IntPtr src) return;
-        _pendingLayout = layout; _pendingUntil = DateTime.UtcNow.AddMilliseconds(400);
+        _pendingLayout = layout; _pendingUntil = DateTime.UtcNow.AddMilliseconds(1000);
         _currentSourceId = layout.Id;
         PostToMain(() => { TISSelectInputSource(src); PollCurrentLayout(); });
     }
@@ -233,7 +255,7 @@ public sealed class MacPlatform : IKeyboardPlatform
     // ------------------------------------------------------------------ typing
     public void Replace(int erase, string text, Action? then = null)
     {
-        _work.Add(() =>
+        Enqueue(() =>
         {
             for (int i = 0; i < erase; i++) PostKey(51);
             var chunk = new System.Text.StringBuilder();
@@ -253,7 +275,7 @@ public sealed class MacPlatform : IKeyboardPlatform
     {
         ushort code = key switch { SpecialKey.Space => 49, SpecialKey.Enter => 36, SpecialKey.Tab => 48, _ => ushort.MaxValue };
         if (code == ushort.MaxValue) return;
-        _work.Add(() => PostKey(code));
+        Enqueue(() => PostKey(code));
     }
 
     private static void PostKey(ushort code, ulong flags = 0)
@@ -287,7 +309,7 @@ public sealed class MacPlatform : IKeyboardPlatform
     // ------------------------------------------------------------------ selection
     public void ConvertSelection(Func<string, string?> convert)
     {
-        _work.Add(() =>
+        Enqueue(() =>
         {
             Thread.Sleep(80);
             var saved = Pasteboard("pbpaste", null);
@@ -444,6 +466,55 @@ public sealed class MacPlatform : IKeyboardPlatform
     private static readonly IntPtr AXFontNameKey = CFStr("AXFontName");
     private static readonly IntPtr AXFontFamilyKey = CFStr("AXFontFamily");
     private static readonly IntPtr AXFontSizeKey = CFStr("AXFontSize");
+
+    private static readonly IntPtr AXStringForRange = CFStr("AXStringForRange");
+    private static readonly IntPtr AXValueAttr = CFStr("AXValue");
+    private static readonly IntPtr AXRoleAttr = CFStr("AXRole");
+    private static readonly IntPtr AXSubroleAttr = CFStr("AXSubrole");
+
+    private static string? AttrString(IntPtr el, IntPtr attr)
+    {
+        if (AXUIElementCopyAttributeValue(el, attr, out var v) != 0 || v == IntPtr.Zero) return null;
+        try { return CFGetTypeID(v) == CFStringGetTypeID() ? CFString(v) : null; }
+        finally { CFRelease(v); }
+    }
+
+    /// <summary>The real text before the caret (never from password fields) — context for the model.</summary>
+    public string? GetTextBeforeCaret(int maxChars)
+    {
+        IntPtr sys = IntPtr.Zero, focused = IntPtr.Zero, rangeVal = IntPtr.Zero, pv = IntPtr.Zero, str = IntPtr.Zero;
+        try
+        {
+            int pid = FrontmostPid();
+            if (pid <= 0 || pid == Environment.ProcessId) return null;
+            sys = AXUIElementCreateApplication(pid);
+            AXUIElementSetMessagingTimeout(sys, 0.25f);
+            if (AXUIElementCopyAttributeValue(sys, AXFocused, out focused) != 0 || focused == IntPtr.Zero) return null;
+            AXUIElementSetMessagingTimeout(focused, 0.25f);
+            if (AttrString(focused, AXRoleAttr) == "AXSecureTextField" || AttrString(focused, AXSubroleAttr) == "AXSecureTextField") return null;
+            if (AXUIElementCopyAttributeValue(focused, AXSelRange, out rangeVal) != 0 || rangeVal == IntPtr.Zero) return null;
+            if (!AXValueGetValue(rangeVal, kAXValueCFRangeType, out CFRange sel) || sel.location <= 0) return null;
+            long from = Math.Max(0, sel.location - maxChars);
+            var r = new CFRange { location = from, length = sel.location - from };
+            pv = AXValueCreate(kAXValueCFRangeType, ref r);
+            if (AXUIElementCopyParameterizedAttributeValue(focused, AXStringForRange, pv, out str) == 0 && str != IntPtr.Zero
+                && CFGetTypeID(str) == CFStringGetTypeID())
+                return CFString(str);
+            var all = AttrString(focused, AXValueAttr);   // fallback: the whole value
+            if (all == null || sel.location > all.Length) return null;
+            int end = (int)sel.location, start = Math.Max(0, end - maxChars);
+            return all[start..end];
+        }
+        catch { return null; }
+        finally
+        {
+            if (str != IntPtr.Zero) CFRelease(str);
+            if (pv != IntPtr.Zero) CFRelease(pv);
+            if (rangeVal != IntPtr.Zero) CFRelease(rangeVal);
+            if (focused != IntPtr.Zero) CFRelease(focused);
+            if (sys != IntPtr.Zero) CFRelease(sys);
+        }
+    }
 
     /// <summary>Font of the character before the caret (AXAttributedStringForRange → AXFont). Size in points.</summary>
     public CaretFont? GetCaretFont()

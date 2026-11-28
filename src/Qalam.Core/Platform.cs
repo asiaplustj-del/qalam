@@ -77,7 +77,10 @@ public interface IKeyboardPlatform : IDisposable
     (int X, int Y, int W, int H)? GetFocusRect() => null;
     /// <summary>Font of the text right before the caret in the focused field (for inline suggestions); null if unknown.</summary>
     CaretFont? GetCaretFont() => null;
+    /// <summary>The real text before the caret in the focused field (up to <paramref name="maxChars"/>), null if not readable.</summary>
+    string? GetTextBeforeCaret(int maxChars) => null;
     void SetStartWithSystem(bool enabled);
     /// <summary>True when a laptop runs on battery (no charger).</summary>
     bool IsOnBattery();
 }
+
