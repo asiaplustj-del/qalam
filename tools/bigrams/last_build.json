@@ -4,7 +4,7 @@
   "written": true,
   "words": 22000,
   "sources": [
-   "HuggingFaceFW/fineweb-2/data/tgk_Cyrl/train: 60,000,091 tokens in 497s"
+   "HuggingFaceFW/fineweb-2/data/tgk_Cyrl/train: 60,000,091 tokens in 189s"
   ]
  },
  "ru": {
@@ -12,9 +12,9 @@
   "written": true,
   "words": 22000,
   "sources": [
-   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/ru.txt.gz: 26,035,627 tokens in 50s",
-   "rus_news_2023_1M: 13,243,454 tokens in 40s",
-   "rus-ru_web-public_2019_1M: 5,720,925 tokens in 58s"
+   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/ru.txt.gz: 26,035,627 tokens in 71s",
+   "rus_news_2023_1M: 13,243,454 tokens in 47s",
+   "rus-ru_web-public_2019_1M: 5,720,925 tokens in 18s"
   ]
  },
  "en": {
@@ -22,8 +22,8 @@
   "written": true,
   "words": 18000,
   "sources": [
-   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/en.txt.gz: 32,206,049 tokens in 43s",
-   "eng_news_2023_1M: 12,793,952 tokens in 43s"
+   "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/mono/en.txt.gz: 32,206,049 tokens in 64s",
+   "eng_news_2023_1M: 12,793,952 tokens in 32s"
   ]
  }
 }
