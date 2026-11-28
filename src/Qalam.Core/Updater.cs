@@ -13,7 +13,7 @@ namespace Qalam.Core;
 /// </summary>
 public static class Updater
 {
-    public const string Repo = "asiaplustj-del/qalam";
+    public const string Repo = "ustokhona/qalam";
     public static string ReleasesPage => $"https://github.com/{Repo}/releases/latest";
 
     public sealed record Release(Version Version, string Tag, string PageUrl, string? AssetUrl, string? AssetName, long AssetBytes);

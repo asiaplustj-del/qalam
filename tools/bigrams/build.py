@@ -74,7 +74,7 @@ def log(*a):
 
 
 def open_url(url, timeout=120):
-    req = urllib.request.Request(url, headers={"User-Agent": "Qalam bigram builder (github.com/asiaplustj-del/qalam)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Qalam bigram builder (github.com/ustokhona/qalam)"})
     return urllib.request.urlopen(req, timeout=timeout)
 
 
